@@ -14,13 +14,63 @@ const app = express();
 
 app.set("trust proxy", 1);
 
-app.use(helmet({ crossOriginResourcePolicy: false })); // allow serving /uploads cross-origin
+/* ─────────── CORS ─────────── */
+
+/* Static allow-list — always allowed regardless of env */
+const STATIC_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:3000",
+  "https://mpl-frontend-liart.vercel.app",   // ← your deployed frontend (no trailing slash!)
+];
+
+/* Also read from env — comma-separated list, e.g.
+   CLIENT_URL="https://app.example.com,https://staging.example.com" */
+const ENV_ALLOWED_ORIGINS = (process.env.CLIENT_URL || "")
+  .split(",")
+  .map((s) => s.trim().replace(/\/$/, ""))    // strip trailing slash
+  .filter(Boolean);
+
+const ALLOWED_ORIGINS = [
+  ...new Set([...STATIC_ALLOWED_ORIGINS, ...ENV_ALLOWED_ORIGINS]),
+];
+
+console.log("[CORS] Allowed origins:", ALLOWED_ORIGINS);
+
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL?.split(",") || "*",
+    origin: function (origin, callback) {
+      /* Allow requests with no origin: curl, Postman, mobile apps, server-to-server */
+      if (!origin) return callback(null, true);
+
+      const cleanOrigin = origin.replace(/\/$/, "");
+
+      if (ALLOWED_ORIGINS.includes(cleanOrigin)) {
+        return callback(null, true);
+      }
+
+      /* Allow any *.onrender.com / *.vercel.app preview URLs (optional) */
+      if (
+        /^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(cleanOrigin) ||
+        /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(cleanOrigin)
+      ) {
+        return callback(null, true);
+      }
+
+      console.warn("[CORS] Blocked origin:", cleanOrigin);
+      return callback(new Error(`CORS blocked: ${cleanOrigin}`));
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+/* ✅ Explicitly handle preflight for every route */
+app.options("*", cors());
 app.use(compression());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
