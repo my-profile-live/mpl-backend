@@ -22,6 +22,7 @@ const STATIC_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://127.0.0.1:5173",
   "http://127.0.0.1:3000",
+  "http://10.231.40.193:5173",
   "https://mpl-frontend-liart.vercel.app",   // ← your deployed frontend (no trailing slash!)
 ];
 

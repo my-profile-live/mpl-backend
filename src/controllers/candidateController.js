@@ -34,6 +34,8 @@ function maskContactInfo(candidateObj, isContacted) {
 /** Builds a Mongo filter object from FilterSidebar.jsx's query params. */
 function buildFilter(query) {
   const filter = {};
+
+  /* Text fields */
   if (query.industry) filter.preferredIndustry = query.industry;
   if (query.state) filter.state = query.state;
   if (query.district) filter.district = query.district;
@@ -42,7 +44,20 @@ function buildFilter(query) {
   if (query.wfh) filter.wfh = query.wfh;
   if (query.education) filter["education.qualification"] = query.education;
   if (query.immediateJoiner === "true") filter.immediateJoining = true;
-  if (query.search) filter.$text = { $search: query.search };
+
+  /* Skills — array of skills; candidate must have ALL of them */
+  if (query.skills) {
+    const skills = Array.isArray(query.skills)
+      ? query.skills
+      : String(query.skills)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (skills.length > 0) {
+      filter.skills = { $all: skills };
+    }
+  }
+
   return filter;
 }
 
@@ -176,4 +191,103 @@ export async function listShortlistedCandidates(req, res) {
     .populate({ path: "jobSeeker", select: PUBLIC_FIELDS });
 
   res.json(new ApiResponse(200, { results: items.map((i) => i.jobSeeker).filter(Boolean) }));
+}
+
+
+/**
+ * GET /api/candidates/search?q=React+developer&page=1&limit=12
+ *
+ * Free-text search across name, job title, current company, and skills.
+ * - Case-insensitive, partial word match
+ * - Splits the query into words → OR-matches across fields
+ * - Example: "React developer" matches:
+ *     currentJobTitle ~ /React/ OR /developer/
+ *     skills ~ /React/ OR /developer/
+ *     fullName ~ /React/ OR /developer/
+ *     currentCompany ~ /React/ OR /developer/
+ */
+export async function searchCandidates(req, res) {
+  const q = (req.query.q || "").trim();
+  const page = Math.max(parseInt(req.query.page) || 1, 1);
+  const limit = Math.min(parseInt(req.query.limit) || 12, 50);
+
+  if (!q) {
+    return res.json(
+      new ApiResponse(200, {
+        results: [],
+        page,
+        limit,
+        total: 0,
+        totalPages: 0,
+      })
+    );
+  }
+
+  /* Split into words, escape regex special chars, drop short noise */
+  const words = q
+    .split(/\s+/)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .filter((w) => w.length >= 2);
+
+  if (words.length === 0) {
+    return res.json(
+      new ApiResponse(200, {
+        results: [],
+        page,
+        limit,
+        total: 0,
+        totalPages: 0,
+      })
+    );
+  }
+
+  /* OR across every word and every searchable field */
+  const orConditions = [];
+  for (const w of words) {
+    const rx = new RegExp(w, "i");
+    orConditions.push(
+      { fullName: rx },
+      { currentJobTitle: rx },
+      { currentCompany: rx },
+      { skills: rx },
+      { preferredIndustry: rx },
+      { about: rx }
+    );
+  }
+
+  const filter = { $or: orConditions };
+
+  const [candidates, total] = await Promise.all([
+    JobSeeker.find(filter)
+      .select(PUBLIC_FIELDS)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    JobSeeker.countDocuments(filter),
+  ]);
+
+  /* Mask contact details for candidates not yet contacted */
+  const contactedIds = new Set(
+    (
+      await Interaction.find({
+        company: req.user.id,
+        type: "contact",
+      }).distinct("jobSeeker")
+    ).map(String)
+  );
+
+  const results = candidates.map((c) =>
+    maskContactInfo(c.toObject(), contactedIds.has(c._id.toString()))
+  );
+
+  res.json(
+    new ApiResponse(200, {
+      results,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      query: q,
+    })
+  );
 }

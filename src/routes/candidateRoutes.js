@@ -6,6 +6,7 @@ const router = Router();
 router.use(protect, requireRole("company"));
 
 router.get("/", candidates.listCandidates);
+router.get("/search", candidates.searchCandidates); 
 router.get("/saved", candidates.listSavedCandidates);
 router.get("/shortlisted", candidates.listShortlistedCandidates);
 router.get("/:id", candidates.getCandidate);
