@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { randomBytes, createHash } from "crypto"; 
+import { randomBytes, createHash } from "crypto";
 import JobSeeker from "../models/JobSeeker.js";
 import Company from "../models/Company.js";
 import PendingSignup from "../models/PendingSignup.js";
@@ -21,6 +21,7 @@ import {
   calcJobSeekerCompletion,
 } from "../utils/profileCompletion.js";
 import SignupPayment from "../models/SignupPayment.js";
+import { getPlanById, DEFAULT_FREE_PLAN_ID } from "../data/plans.js";
 
 /* ───────────────────────── CONSTANTS ───────────────────────── */
 const MODEL = { jobseeker: JobSeeker, company: Company };
@@ -67,6 +68,27 @@ async function verifyEmailOtp(otp, hash, expiry) {
   const ok = await compareOtp(otp, hash);
   if (!ok) throw new ApiError(400, "Invalid OTP.");
   return true;
+}
+
+
+/**
+ * 🎁 Grants the default free plan (currently "1m") to a newly-created user.
+ * Mutates the plain payload object BEFORE Model.create() is called.
+ * No payment is charged — it's a welcome bonus on signup.
+ */
+function applyFreePlan(userType, payload) {
+  const plan = getPlanById(userType, DEFAULT_FREE_PLAN_ID);
+  if (!plan) return payload;
+
+  const now = new Date();
+  const expiry = new Date(now.getTime() + plan.days * 24 * 60 * 60 * 1000);
+
+  return {
+    ...payload,
+    currentPlan: plan.id,
+    planExpiry: expiry,
+    leadsRemaining: plan.leads,
+  };
 }
 
 /* ───────────────────────── SIGNUP ───────────────────────── */
@@ -147,8 +169,9 @@ export const signupCompany = asyncHandler(async (req, res) => {
 
   if (!otpVerificationEnabled()) {
     const completion = calcCompanyCompletion(payload);
+    const payloadWithPlan = applyFreePlan("company", payload);
     const company = await Company.create({
-      ...payload,
+      ...payloadWithPlan,
       isMobileVerified: true,
       isEmailVerified: true,
       profileCompletion: completion,
@@ -266,8 +289,9 @@ export const signupJobSeeker = asyncHandler(async (req, res) => {
 
   if (!otpVerificationEnabled()) {
     const completion = calcJobSeekerCompletion(payload);
+    const payloadWithPlan = applyFreePlan("jobseeker", payload);
     const userDoc = await JobSeeker.create({
-      ...payload,
+      ...payloadWithPlan,
       isMobileVerified: true,
       isEmailVerified: true,
       profileCompletion: completion,
@@ -420,8 +444,11 @@ export const verifySignupOtp = asyncHandler(async (req, res) => {
         ? calcCompanyCompletion(pending.payload)
         : calcJobSeekerCompletion(pending.payload);
 
+    /* 🎁 Grant the default free plan on account creation */
+    const payloadWithPlan = applyFreePlan(pending.userType, pending.payload);
+
     const userDoc = await Model.create({
-      ...pending.payload,
+      ...payloadWithPlan,
       isMobileVerified: true,
       isEmailVerified: true,
       profileCompletion: completion,
