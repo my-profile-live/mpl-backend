@@ -19,5 +19,6 @@ router.put("/me", (req, res, next) => {
 router.post("/photo", uploadPhoto, profile.uploadMyPhoto);
 router.post("/logo", uploadLogo, profile.uploadMyLogo);
 router.post("/change-password", validate(changePasswordSchema), profile.changePassword);
+router.post("/welcome-seen", profile.markWelcomeSeen);
 
 export default router;

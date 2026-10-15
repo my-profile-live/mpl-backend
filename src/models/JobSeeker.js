@@ -91,6 +91,7 @@ const jobSeekerSchema = new mongoose.Schema(
     paymentAmount: { type: Number, default: 0 },
     paymentAt: { type: Date, default: null },
     paymentId: { type: String, default: null },   /* ✅ NEW — mirrors Company */
+     hasSeenWelcome: { type: Boolean, default: false },
 
     lastLoginAt: Date,
   },

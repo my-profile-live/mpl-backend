@@ -65,3 +65,16 @@ export async function changePassword(req, res) {
 
   res.json(new ApiResponse(200, null, "Password changed."));
 }
+
+
+/** POST /api/profile/welcome-seen — marks the welcome modal as dismissed. */
+export async function markWelcomeSeen(req, res) {
+  const user = req.userDoc;
+  if (!user.hasSeenWelcome) {
+    user.hasSeenWelcome = true;
+    await user.save();
+  }
+  res.json(
+    new ApiResponse(200, { hasSeenWelcome: true }, "Welcome dismissed.")
+  );
+}
