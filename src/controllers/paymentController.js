@@ -5,7 +5,28 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import SignupPayment from "../models/SignupPayment.js";
 
-const SIGNUP_AMOUNT_PAISE = 100; // ₹1
+/**
+ * Signup verification fee, in paise (Razorpay wants the smallest currency
+ * unit — paise for INR).
+ *
+ *   ₹1  = 100   paise
+ *   ₹99 = 9900  paise
+ *
+ * Keep this map as the single source of truth for the amount on the backend.
+ * The frontend mirrors it in PaymentStep.jsx.
+ */
+const SIGNUP_FEE_PAISE = {
+  company: 9900,    // ₹99
+  jobseeker: 100,   // ₹1
+};
+
+function getSignupFeePaise(userType) {
+  const amount = SIGNUP_FEE_PAISE[userType];
+  if (!amount) {
+    throw new ApiError(400, "userType must be 'company' or 'jobseeker'.");
+  }
+  return amount;
+}
 
 /* ─────────────────────── CREATE ORDER ─────────────────────── */
 
@@ -16,6 +37,8 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
     throw new ApiError(400, "userType must be 'company' or 'jobseeker'.");
   }
 
+  const amountPaise = getSignupFeePaise(userType);
+
   /* ─── Dummy mode ─── */
   if (!isRazorpayEnabled()) {
     const orderId = `dummy_order_${Date.now()}_${Math.random()
@@ -25,7 +48,7 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
     return res.json(
       new ApiResponse(
         200,
-        { dummy: true, orderId, amount: SIGNUP_AMOUNT_PAISE, currency: "INR" },
+        { dummy: true, orderId, amount: amountPaise, currency: "INR" },
         "Dummy order created."
       )
     );
@@ -35,13 +58,13 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
   const razorpay = getRazorpay();
 
   const order = await razorpay.orders.create({
-    amount: SIGNUP_AMOUNT_PAISE,
+    amount: amountPaise,
     currency: "INR",
     receipt: `signup_${userType}_${Date.now()}`,
     notes: { userType, purpose: "signup" },
   });
 
-  console.log("[razorpay] order created:", order.id);
+  console.log("[razorpay] order created:", order.id, `₹${amountPaise / 100}`);
 
   return res.json(
     new ApiResponse(
@@ -73,6 +96,8 @@ export const verifySignupPayment = asyncHandler(async (req, res) => {
     throw new ApiError(400, "userType must be 'company' or 'jobseeker'.");
   }
 
+  const amountPaise = getSignupFeePaise(userType);
+
   /* ─── Dummy mode ─── */
   if (!isRazorpayEnabled()) {
     const dummyOrderId = orderId || `dummy_order_${Date.now()}`;
@@ -82,7 +107,7 @@ export const verifySignupPayment = asyncHandler(async (req, res) => {
       userType,
       orderId: dummyOrderId,
       paymentId: dummyPaymentId,
-      amount: SIGNUP_AMOUNT_PAISE,
+      amount: amountPaise,
       status: "paid",
       dummy: true,
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
@@ -91,7 +116,11 @@ export const verifySignupPayment = asyncHandler(async (req, res) => {
     return res.json(
       new ApiResponse(
         200,
-        { signupPayment: true, paymentId: dummyPaymentId, orderId: dummyOrderId },
+        {
+          signupPayment: true,
+          paymentId: dummyPaymentId,
+          orderId: dummyOrderId,
+        },
         "Payment verified (dummy)."
       )
     );
@@ -122,7 +151,7 @@ export const verifySignupPayment = asyncHandler(async (req, res) => {
     userType,
     orderId: razorpay_order_id,
     paymentId: razorpay_payment_id,
-    amount: SIGNUP_AMOUNT_PAISE,
+    amount: amountPaise,
     status: "paid",
     dummy: false,
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),

@@ -124,10 +124,10 @@ export async function jobSeekerDashboard(req, res) {
 export async function companyDashboard(req, res) {
   const company = req.user.id;
 
-  const [saved, shortlisted, contacted, recentAgg] = await Promise.all([
-    Interaction.countDocuments({ company, type: "save" }),
-    Interaction.countDocuments({ company, type: "shortlist" }),
-    Interaction.countDocuments({ company, type: "contact" }),
+  const [savedIds, shortlistedIds, contactedIds, recentAgg] = await Promise.all([
+    Interaction.distinct("jobSeeker", { company, type: "save" }),
+    Interaction.distinct("jobSeeker", { company, type: "shortlist" }),
+    Interaction.distinct("jobSeeker", { company, type: "contact" }),
 
     Interaction.aggregate([
       {
@@ -175,7 +175,12 @@ export async function companyDashboard(req, res) {
     new ApiResponse(200, {
       status: req.userDoc.status,
       leadsRemaining: req.userDoc.leadsRemaining,
-      stats: { saved, shortlisted, contacted, activeJobs: 0 },
+      stats: {
+        saved: savedIds.length,
+        shortlisted: shortlistedIds.length,
+        contacted: contactedIds.length,
+        activeJobs: 0,
+      },
       recentActivity: recentAgg,
     })
   );

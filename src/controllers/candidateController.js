@@ -10,6 +10,13 @@ const PUBLIC_FIELDS =
   "immediateJoining state district city pinCode about gender profileCompletion status createdAt " +
   "mobileNumber email";
 
+
+const PUBLIC_SHARE_FIELDS =
+  "fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
+  "expectedSalary noticePeriod preferredIndustry preferredJobState preferredJobCity jobType wfh " +
+  "languagesKnown employmentHistory education skills hobbies willingToTravel readyToRelocate " +
+  "immediateJoining state district city about gender profileCompletion status createdAt";
+
 function maskMobile(mobile) {
   if (!mobile) return null;
   return `${mobile.slice(0, 5)}XXXXX`;
@@ -44,6 +51,36 @@ function buildFilter(query) {
   if (query.wfh) filter.wfh = query.wfh;
   if (query.education) filter["education.qualification"] = query.education;
   if (query.immediateJoiner === "true") filter.immediateJoining = true;
+
+  /* ─── Salary filter ───
+     Company wants candidates whose `expectedSalary` is ≤ maxSalary (LPA).
+     `expectedSalary` is stored as a String (e.g. "9.5"), so we use
+     $expr + $toDouble to compare numerically on the fly.
+     Skip candidates whose salary can't be parsed (empty, "Negotiable", etc.). */
+  if (query.maxSalary != null && query.maxSalary !== "") {
+    const max = Number(query.maxSalary);
+    if (!isNaN(max) && max > 0) {
+      filter.$expr = {
+        $and: [
+          { $ne: ["$expectedSalary", null] },
+          { $ne: ["$expectedSalary", ""] },
+          {
+            $lte: [
+              {
+                $convert: {
+                  input: "$expectedSalary",
+                  to: "double",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+              max,
+            ],
+          },
+        ],
+      };
+    }
+  }
 
   /* Skills — array of skills; candidate must have ALL of them */
   if (query.skills) {
@@ -80,9 +117,13 @@ export async function listCandidates(req, res) {
     (await Interaction.find({ company: req.user.id, type: "contact" }).distinct("jobSeeker")).map(String)
   );
 
-  const results = candidates.map((c) =>
-    maskContactInfo(c.toObject(), contactedIds.has(c._id.toString()))
-  );
+const results = candidates.map((c) => {
+  const contacted = contactedIds.has(c._id.toString());
+  return {
+    ...maskContactInfo(c.toObject(), contacted),
+    isContacted: contacted,
+  };
+});
 
   res.json(
     new ApiResponse(200, {
@@ -276,9 +317,13 @@ export async function searchCandidates(req, res) {
     ).map(String)
   );
 
-  const results = candidates.map((c) =>
-    maskContactInfo(c.toObject(), contactedIds.has(c._id.toString()))
-  );
+const results = candidates.map((c) => {
+  const contacted = contactedIds.has(c._id.toString());
+  return {
+    ...maskContactInfo(c.toObject(), contacted),
+    isContacted: contacted,
+  };
+});
 
   res.json(
     new ApiResponse(200, {
@@ -290,4 +335,21 @@ export async function searchCandidates(req, res) {
       query: q,
     })
   );
+}
+
+export async function getPublicProfile(req, res) {
+  const { id } = req.params;
+
+  /* Validate ObjectId so a bad URL doesn't 500 */
+  if (!id || !id.match(/^[a-f\d]{24}$/i)) {
+    throw new ApiError(404, "Profile not found.");
+  }
+
+  const candidate = await JobSeeker.findById(id)
+    .select(PUBLIC_SHARE_FIELDS)
+    .lean();
+
+  if (!candidate) throw new ApiError(404, "Profile not found.");
+
+  res.json(new ApiResponse(200, { profile: candidate }));
 }

@@ -7,7 +7,13 @@ router.use(protect);
 
 router.get("/", plans.getPlans);
 router.get("/my-subscription", plans.getMySubscription);
-router.post("/subscribe", plans.subscribeToPlan);
-router.post("/buy-extra-leads", plans.buyExtraLeads);
+
+/* Plan upgrade — two-step Razorpay flow */
+router.post("/checkout", plans.createPlanOrder);
+router.post("/verify-payment", plans.verifyPlanPayment);
+
+/* Extra leads — two-step Razorpay flow */
+router.post("/extra-leads/checkout", plans.createExtraLeadsOrder);
+router.post("/extra-leads/verify-payment", plans.verifyExtraLeadsPayment);
 
 export default router;

@@ -21,6 +21,7 @@ import {
   calcJobSeekerCompletion,
 } from "../utils/profileCompletion.js";
 import SignupPayment from "../models/SignupPayment.js";
+import Subscription from "../models/Subscription.js";
 import { getPlanById, DEFAULT_FREE_PLAN_ID } from "../data/plans.js";
 
 /* ───────────────────────── CONSTANTS ───────────────────────── */
@@ -47,8 +48,35 @@ function stripSensitive(doc) {
   return obj;
 }
 
+/**
+ * Computes the plan status for the login/session payload.
+ *
+ *   "trial"   → user is on the free welcome plan (1m or trial), not expired
+ *   "active"  → user is on a paid plan, not expired
+ *   "expired" → no plan, or the plan's expiry has passed
+ *
+ * The frontend uses this to render trial banner / active badge / expired warning.
+ */
+function getPlanStatus(userDoc) {
+  const plan = userDoc.currentPlan;
+  const expiry = userDoc.planExpiry;
+
+  /* No plan on file → treat as expired */
+  if (!plan || !expiry) return "expired";
+
+  /* Expiry has passed */
+  if (expiry <= new Date()) return "expired";
+
+  /* Free welcome plans → trial */
+  if (plan === "1m" || plan === "trial") return "trial";
+
+  /* Paid plan, still valid */
+  return "active";
+}
+
 function issueSession(userType, userDoc) {
   const token = signToken({ id: userDoc._id.toString(), role: userType });
+
   return {
     token,
     userType,
@@ -56,6 +84,12 @@ function issueSession(userType, userDoc) {
       id: userDoc._id,
       email: userDoc.email || userDoc.companyEmail || null,
       mobileNumber: userDoc.mobileNumber || null,
+    },
+    plan: {
+      currentPlan: userDoc.currentPlan || null,
+      planExpiry: userDoc.planExpiry || null,
+      leadsRemaining: userDoc.leadsRemaining ?? 0,
+      status: getPlanStatus(userDoc),   // "trial" | "active" | "expired"
     },
     profile: stripSensitive(userDoc),
   };
@@ -70,10 +104,12 @@ async function verifyEmailOtp(otp, hash, expiry) {
   return true;
 }
 
-
 /**
  * 🎁 Grants the default free plan (currently "1m") to a newly-created user.
- * Mutates the plain payload object BEFORE Model.create() is called.
+ * Mutates the plain payload object BEFORE Model.create() is called, so the
+ * user doc already has currentPlan / planExpiry / leadsRemaining from the
+ * very first save.
+ *
  * No payment is charged — it's a welcome bonus on signup.
  */
 function applyFreePlan(userType, payload) {
@@ -91,6 +127,43 @@ function applyFreePlan(userType, payload) {
   };
 }
 
+/**
+ * 🎁 Logs a Subscription record for the free plan so it shows up in
+ * "My Subscription" (same shape as planController.subscribeToPlan).
+ *
+ * Must run AFTER the user doc is created (needs userDoc._id).
+ * Fails soft — if the log fails, the user still has their plan because
+ * the plan fields are already set on the user doc.
+ */
+async function logFreePlanSubscription(userType, userDoc) {
+  try {
+    const plan = getPlanById(userType, DEFAULT_FREE_PLAN_ID);
+    if (!plan) return;
+
+    /* Reuse whatever expiry the user doc already has, so the sub record
+       stays in sync with the user fields. */
+    const expiresAt =
+      userDoc.planExpiry ||
+      new Date(Date.now() + plan.days * 24 * 60 * 60 * 1000);
+
+    await Subscription.create({
+      ownerType: userType,
+      owner: userDoc._id,
+      ownerModel: userType === "company" ? "Company" : "JobSeeker",
+      planId: plan.id,
+      label: plan.label,
+      price: 0, // free welcome plan
+      leadsGranted: plan.leads,
+      startedAt: new Date(),
+      expiresAt,
+      status: "active",
+    });
+  } catch (err) {
+    console.error("[free-plan] subscription log failed:", err.message);
+    /* Do NOT rethrow — the user still has the plan on the user doc */
+  }
+}
+
 /* ───────────────────────── SIGNUP ───────────────────────── */
 
 export const signupCompany = asyncHandler(async (req, res) => {
@@ -106,19 +179,14 @@ export const signupCompany = asyncHandler(async (req, res) => {
   const lowerEmail = body.companyEmail.toLowerCase();
   const mobile = body.mobileNumber;
 
-  const [
-    byPan,
-    coByEmail,
-    jsByEmail,
-    coByMobile,
-    jsByMobile,
-  ] = await Promise.all([
-    Company.findOne({ panNumber: upperPan }).select("_id").lean(),
-    Company.findOne({ companyEmail: lowerEmail }).select("_id").lean(),
-    JobSeeker.findOne({ email: lowerEmail }).select("_id").lean(),
-    Company.findOne({ mobileNumber: mobile }).select("_id").lean(),
-    JobSeeker.findOne({ mobileNumber: mobile }).select("_id").lean(),
-  ]);
+  const [byPan, coByEmail, jsByEmail, coByMobile, jsByMobile] =
+    await Promise.all([
+      Company.findOne({ panNumber: upperPan }).select("_id").lean(),
+      Company.findOne({ companyEmail: lowerEmail }).select("_id").lean(),
+      JobSeeker.findOne({ email: lowerEmail }).select("_id").lean(),
+      Company.findOne({ mobileNumber: mobile }).select("_id").lean(),
+      JobSeeker.findOne({ mobileNumber: mobile }).select("_id").lean(),
+    ]);
 
   const emailTaken = !!(coByEmail || jsByEmail);
   const mobileTaken = !!(coByMobile || jsByMobile);
@@ -177,6 +245,9 @@ export const signupCompany = asyncHandler(async (req, res) => {
       profileCompletion: completion,
       lastLoginAt: new Date(),
     });
+
+    /* 🎁 Log the free plan as a Subscription record */
+    await logFreePlanSubscription("company", company);
 
     return res
       .status(201)
@@ -297,6 +368,9 @@ export const signupJobSeeker = asyncHandler(async (req, res) => {
       profileCompletion: completion,
       lastLoginAt: new Date(),
     });
+
+    /* 🎁 Log the free plan as a Subscription record */
+    await logFreePlanSubscription("jobseeker", userDoc);
 
     return res
       .status(201)
@@ -458,6 +532,9 @@ export const verifySignupOtp = asyncHandler(async (req, res) => {
       paymentAt: null,
     });
 
+    /* 🎁 Log the free plan as a Subscription record */
+    await logFreePlanSubscription(pending.userType, userDoc);
+
     await PendingSignup.deleteOne({ _id: pending._id });
 
     const name =
@@ -545,7 +622,8 @@ export const requestMobileLoginOtp = asyncHandler(async (req, res) => {
 
   const Model = MODEL[userType];
   const user = await Model.findOne({ mobileNumber });
-  if (!user) throw new ApiError(404, "No account found with this mobile number.");
+  if (!user)
+    throw new ApiError(404, "No account found with this mobile number.");
 
   const e164 = toE164(mobileNumber);
 
@@ -588,7 +666,10 @@ export const verifyMobileLoginOtp = asyncHandler(async (req, res) => {
       ok = await checkMobileOtp(pendingLogin.mobileReqId, otp);
     } catch (err) {
       console.error("[msg91] login checkMobileOtp failed:", err.message);
-      throw new ApiError(502, "Could not verify OTP right now. Please try again.");
+      throw new ApiError(
+        502,
+        "Could not verify OTP right now. Please try again."
+      );
     }
   }
 
@@ -596,7 +677,8 @@ export const verifyMobileLoginOtp = asyncHandler(async (req, res) => {
 
   const Model = MODEL[userType];
   const user = await Model.findOne({ mobileNumber });
-  if (!user) throw new ApiError(404, "No account found with this mobile number.");
+  if (!user)
+    throw new ApiError(404, "No account found with this mobile number.");
 
   user.lastLoginAt = new Date();
   await user.save();
@@ -622,7 +704,9 @@ export const loginWithEmail = asyncHandler(async (req, res) => {
 
   if (!user) {
     userType = "company";
-    user = await Company.findOne({ companyEmail: lower }).select("+passwordHash");
+    user = await Company.findOne({ companyEmail: lower }).select(
+      "+passwordHash"
+    );
   }
 
   if (!user) throw new ApiError(401, "Invalid email or password.");
@@ -644,7 +728,7 @@ export const logout = asyncHandler(async (req, res) => {
 
 /* ─────────────────────── PASSWORD RESET ─────────────────────── */
 
-const RESET_TOKEN_TTL_MS = 30 * 60 * 1000;   // 30 minutes
+const RESET_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 function generateResetToken() {
   return randomBytes(32).toString("hex");
@@ -706,8 +790,7 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     `&uid=${user._id.toString()}` +
     `&type=${userType}`;
 
-  const name =
-    userType === "company" ? user.companyName : user.fullName;
+  const name = userType === "company" ? user.companyName : user.fullName;
 
   try {
     await sendPasswordResetLink(lowerEmail, name, resetUrl);
@@ -781,11 +864,7 @@ export const resetPassword = asyncHandler(async (req, res) => {
   await PasswordReset.deleteMany({ userId: uid, userType });
 
   return res.json(
-    new ApiResponse(
-      200,
-      null,
-      "Password reset successfully. You can now log in."
-    )
+    new ApiResponse(200, null, "Password reset successfully. You can now log in.")
   );
 });
 
@@ -1040,7 +1119,10 @@ export const completeSignupPayment = asyncHandler(async (req, res) => {
       userId,
       hasUser: !!req.user,
     });
-    throw new ApiError(401, "Session is invalid. Please sign up or log in again.");
+    throw new ApiError(
+      401,
+      "Session is invalid. Please sign up or log in again."
+    );
   }
 
   const Model = MODEL[userType];
@@ -1108,6 +1190,7 @@ export const completeSignupPayment = asyncHandler(async (req, res) => {
     )
   );
 });
+
 /* ───────────────────────── SESSION ───────────────────────── */
 
 export const getMe = asyncHandler(async (req, res) => {

@@ -146,19 +146,18 @@ export async function jobSeekerActivity(req, res) {
   const total = totalAgg?.[0]?.total || 0;
   const unlockedSet = new Set(unlockedCompanyIds.map(String));
 
-  /* Masking rules per row:
-     - direction === jobseeker_to_company → YOU unlocked them → reveal
-     - direction === company_to_jobseeker AND type === "contact" → reveal
-     - Otherwise (view/shortlist from a company) → reveal only if YOU unlocked them  */
   const results = items.map((it) => {
     const companyId = it.company?._id?.toString();
     const isCompanyUnlocked = companyId ? unlockedSet.has(companyId) : false;
-    const isSelfInitiated = it.direction === "jobseeker_to_company";
-    const isRevealedByContact =
-      it.type === "contact" && it.direction === "company_to_jobseeker";
-    const isRevealed = isSelfInitiated || isRevealedByContact || isCompanyUnlocked;
+
+    /* Reveal ONLY if the JOB SEEKER unlocked this company.
+       What the company did (view/shortlist/contact) is IRRELEVANT
+       for what the job seeker is allowed to see. */
+    const isRevealed = isCompanyUnlocked;
 
     if (!isRevealed && it.company) {
+      /* Hide company name too — otherwise the "A company" placeholder
+         logic on the frontend never fires. */
       it.company = {
         ...it.company,
         companyName: null,
@@ -167,7 +166,12 @@ export async function jobSeekerActivity(req, res) {
       };
     }
 
+    /* Attach a boolean the frontend can rely on directly */
     it.isRevealed = isRevealed;
+
+    /* Keep the original direction so the frontend can render an
+       appropriate label ("Company unlocked your contact" vs
+       "You unlocked this company's contact"). */
     return it;
   });
 
