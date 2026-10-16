@@ -1,3 +1,4 @@
+import { computePlanState } from "../constants/plans.js";
 import Interaction from "../models/Interaction.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 
@@ -103,6 +104,7 @@ export async function jobSeekerDashboard(req, res) {
   res.json(
     new ApiResponse(200, {
       completion: req.userDoc.profileCompletion,
+      plan: computePlanState(req.userDoc),
       stats: {
         profileViews: viewCompanies.length,
         shortlists: shortlistCompanies.length,
@@ -175,6 +177,7 @@ export async function companyDashboard(req, res) {
     new ApiResponse(200, {
       status: req.userDoc.status,
       leadsRemaining: req.userDoc.leadsRemaining,
+      plan: computePlanState(req.userDoc),   // ⬅️ new
       stats: {
         saved: savedIds.length,
         shortlisted: shortlistedIds.length,

@@ -23,6 +23,7 @@ import {
 import SignupPayment from "../models/SignupPayment.js";
 import Subscription from "../models/Subscription.js";
 import { getPlanById, DEFAULT_FREE_PLAN_ID } from "../data/plans.js";
+import { computePlanState } from "../constants/plans.js";
 
 /* ───────────────────────── CONSTANTS ───────────────────────── */
 const MODEL = { jobseeker: JobSeeker, company: Company };
@@ -58,22 +59,8 @@ function stripSensitive(doc) {
  * The frontend uses this to render trial banner / active badge / expired warning.
  */
 function getPlanStatus(userDoc) {
-  const plan = userDoc.currentPlan;
-  const expiry = userDoc.planExpiry;
-
-  /* No plan on file → treat as expired */
-  if (!plan || !expiry) return "expired";
-
-  /* Expiry has passed */
-  if (expiry <= new Date()) return "expired";
-
-  /* Free welcome plans → trial */
-  if (plan === "1m" || plan === "trial") return "trial";
-
-  /* Paid plan, still valid */
-  return "active";
+  return computePlanState(userDoc).status;
 }
-
 function issueSession(userType, userDoc) {
   const token = signToken({ id: userDoc._id.toString(), role: userType });
 
@@ -85,11 +72,12 @@ function issueSession(userType, userDoc) {
       email: userDoc.email || userDoc.companyEmail || null,
       mobileNumber: userDoc.mobileNumber || null,
     },
-    plan: {
+       plan: {
       currentPlan: userDoc.currentPlan || null,
       planExpiry: userDoc.planExpiry || null,
       leadsRemaining: userDoc.leadsRemaining ?? 0,
-      status: getPlanStatus(userDoc),   // "trial" | "active" | "expired"
+      ...computePlanState(userDoc),
+      // status, daysLeft, graceDaysRemaining, expiredAt, hardStopAt, shouldShowReminder
     },
     profile: stripSensitive(userDoc),
   };

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { protect, requireRole } from "../middleware/auth.js";
 import * as companies from "../controllers/companyController.js";
+import { requireActivePlan } from "../middleware/requireActivePlan.js";
 
 const router = Router();
 router.use(protect);
@@ -9,6 +10,7 @@ router.use(protect);
 router.post(
   "/:id/unlock-contact",
   requireRole("jobseeker"),
+  requireActivePlan,
   companies.unlockCompanyContact
 );
 
