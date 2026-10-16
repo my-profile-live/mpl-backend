@@ -19,24 +19,27 @@ export function errorHandler(err, req, res, next) {
     const field = Object.keys(err.keyPattern || {})[0] || "field";
     message = `An account with this ${field} already exists.`;
   }
-  // Mongoose bad ObjectId
+  // Mongoose bad ObjectId — do not echo the raw value back to the client.
   if (err.name === "CastError") {
     statusCode = 400;
-    message = `Invalid ${err.path}: ${err.value}`;
+    message = "Invalid id.";
   }
 
   statusCode = statusCode || 500;
   message = message || "Internal server error";
 
-  if (!err.isOperational) {
+  if (!err.isOperational || statusCode >= 500) {
     console.error("[unhandled error]", err);
+  }
+
+  if (!err.isOperational && statusCode >= 500) {
+    message = "Internal server error";
   }
 
   res.status(statusCode).json({
     success: false,
     statusCode,
     message,
-    details: err.details || undefined,
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    details: err.isOperational ? err.details || undefined : undefined,
   });
 }

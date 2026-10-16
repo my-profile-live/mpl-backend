@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { randomBytes, createHash } from "crypto";
+import { safeEqualString } from "../utils/secureCompare.js";
 import JobSeeker from "../models/JobSeeker.js";
 import Company from "../models/Company.js";
 import PendingSignup from "../models/PendingSignup.js";
@@ -24,19 +25,27 @@ import SignupPayment from "../models/SignupPayment.js";
 import Subscription from "../models/Subscription.js";
 import { getPlanById, DEFAULT_FREE_PLAN_ID } from "../data/plans.js";
 import { computePlanState } from "../constants/plans.js";
+import { ensurePublicSlug } from "../utils/publicSlug.js";
 
 /* ───────────────────────── CONSTANTS ───────────────────────── */
 const MODEL = { jobseeker: JobSeeker, company: Company };
 const EMAIL_FIELD = { jobseeker: "email", company: "companyEmail" };
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("mpl-invalid-login-placeholder", 10);
+
 function otpVerificationEnabled() {
+  /* Never allow a production process to skip OTP, even if the flag is off. */
+  if (process.env.NODE_ENV === "production") return true;
   return process.env.OTP_VERIFICATION_ENABLED !== "false";
 }
 
 function isDummyOtp(otp) {
+  /* Dummy codes are a local-dev convenience. They must not work in production. */
+  if (process.env.NODE_ENV === "production") return false;
   const dummy = process.env.OTP_DUMMY;
-  return dummy && otp === dummy;
+  if (!dummy) return false;
+  return safeEqualString(String(otp ?? ""), String(dummy));
 }
 
 /* ───────────────────────── HELPERS ───────────────────────── */
@@ -359,6 +368,9 @@ export const signupJobSeeker = asyncHandler(async (req, res) => {
 
     /* 🎁 Log the free plan as a Subscription record */
     await logFreePlanSubscription("jobseeker", userDoc);
+    await ensurePublicSlug(userDoc._id, userDoc.fullName).catch((err) => {
+      console.error("[slug]", err.message);
+    });
 
     return res
       .status(201)
@@ -522,6 +534,11 @@ export const verifySignupOtp = asyncHandler(async (req, res) => {
 
     /* 🎁 Log the free plan as a Subscription record */
     await logFreePlanSubscription(pending.userType, userDoc);
+    if (pending.userType === "jobseeker") {
+      await ensurePublicSlug(userDoc._id, userDoc.fullName).catch((err) => {
+        console.error("[slug]", err.message);
+      });
+    }
 
     await PendingSignup.deleteOne({ _id: pending._id });
 
@@ -610,8 +627,13 @@ export const requestMobileLoginOtp = asyncHandler(async (req, res) => {
 
   const Model = MODEL[userType];
   const user = await Model.findOne({ mobileNumber });
-  if (!user)
-    throw new ApiError(404, "No account found with this mobile number.");
+  const generic =
+    "If an account exists for this number, an OTP has been sent.";
+
+  /* Same response whether or not the number is registered. */
+  if (!user) {
+    return res.json(new ApiResponse(200, { sent: true }, generic));
+  }
 
   const e164 = toE164(mobileNumber);
 
@@ -625,9 +647,7 @@ export const requestMobileLoginOtp = asyncHandler(async (req, res) => {
 
   await LoginOtp.create({ userType, mobile: e164, mobileReqId });
 
-  return res.json(
-    new ApiResponse(200, { sent: true }, "OTP sent to your mobile number.")
-  );
+  return res.json(new ApiResponse(200, { sent: true }, generic));
 });
 
 export const verifyMobileLoginOtp = asyncHandler(async (req, res) => {
@@ -697,7 +717,10 @@ export const loginWithEmail = asyncHandler(async (req, res) => {
     );
   }
 
-  if (!user) throw new ApiError(401, "Invalid email or password.");
+  if (!user) {
+    await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+    throw new ApiError(401, "Invalid email or password.");
+  }
 
   const match = await bcrypt.compare(password, user.passwordHash);
   if (!match) throw new ApiError(401, "Invalid email or password.");
@@ -866,8 +889,21 @@ export const resetPassword = asyncHandler(async (req, res) => {
  * Email and mobile are also checked against JobSeeker collection so
  * the same email/mobile can't be used for both profile types.
  */
+function asTrimmedString(value, label) {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string") {
+    throw new ApiError(400, `${label} must be a string.`);
+  }
+  return value.trim();
+}
+
 export const checkCompanyUniqueness = asyncHandler(async (req, res) => {
   const body = req.body || {};
+  body.panNumber = asTrimmedString(body.panNumber, "panNumber");
+  body.gstNumber = asTrimmedString(body.gstNumber, "gstNumber");
+  body.cinNumber = asTrimmedString(body.cinNumber, "cinNumber");
+  body.companyEmail = asTrimmedString(body.companyEmail, "companyEmail");
+  body.mobileNumber = asTrimmedString(body.mobileNumber, "mobileNumber");
   const details = [];
   const checked = [];
   const jobs = [];
@@ -1018,8 +1054,8 @@ export const checkJobSeekerUniqueness = asyncHandler(async (req, res) => {
   const details = [];
   const checked = [];
 
-  const email = body.email?.trim().toLowerCase();
-  const mobile = body.mobileNumber?.trim();
+  const email = asTrimmedString(body.email, "email").toLowerCase();
+  const mobile = asTrimmedString(body.mobileNumber, "mobileNumber");
 
   if (!email && !mobile) {
     throw new ApiError(400, "Provide at least one of: email, mobileNumber.");
@@ -1092,7 +1128,7 @@ export const checkJobSeekerUniqueness = asyncHandler(async (req, res) => {
 /* ─────────────────── COMPLETE SIGNUP PAYMENT ─────────────────── */
 
 export const completeSignupPayment = asyncHandler(async (req, res) => {
-  const { paymentId, amount } = req.body;
+  const { paymentId } = req.body;
 
   if (!paymentId) {
     throw new ApiError(400, "paymentId is required.");
@@ -1128,26 +1164,8 @@ export const completeSignupPayment = asyncHandler(async (req, res) => {
     );
   }
 
-  /* ─── Verify the payment record ─── */
-  const payment = await SignupPayment.findOne({
-    paymentId,
-    userType,
-    status: "paid",
-  });
-
-  if (!payment) {
-    console.error("[complete-payment] payment not found", {
-      paymentId,
-      userType,
-    });
-    throw new ApiError(
-      400,
-      "Payment could not be verified. Please complete the payment again."
-    );
-  }
-
-  /* ─── Idempotent: if already recorded, return success ─── */
-  if (user.paymentDone && user.paymentId === paymentId) {
+  /* ─── Idempotent: payment already on this account ─── */
+  if (user.paymentDone) {
     return res.json(
       new ApiResponse(
         200,
@@ -1157,18 +1175,55 @@ export const completeSignupPayment = asyncHandler(async (req, res) => {
     );
   }
 
+  /* Bind the paid record to this user so another account cannot reuse it.
+     Client-supplied amount is ignored. New Cashfree records also have to
+     match this account's email and mobile. */
+  const payerEmail = String(user.email || user.companyEmail || "")
+    .trim()
+    .toLowerCase();
+  const payerPhone = String(user.mobileNumber || "").replace(/\D/g, "").slice(-10);
+
+  const payment = await SignupPayment.findOneAndUpdate(
+    {
+      paymentId,
+      userType,
+      status: "paid",
+      expiresAt: { $gt: new Date() },
+      $and: [
+        { $or: [{ consumedBy: null }, { consumedBy: user._id }] },
+        {
+          $or: [
+            { customerEmail: null },
+            { customerEmail: { $exists: false } },
+            { customerEmail: payerEmail },
+          ],
+        },
+        {
+          $or: [
+            { customerPhone: null },
+            { customerPhone: { $exists: false } },
+            { customerPhone: payerPhone },
+          ],
+        },
+      ],
+    },
+    { $set: { consumedBy: user._id } },
+    { new: true }
+  );
+
+  if (!payment) {
+    throw new ApiError(
+      400,
+      "Payment could not be verified. Please complete the payment again."
+    );
+  }
+
   /* ─── Record the payment on the user ─── */
   user.paymentDone = true;
-  user.paymentAmount = amount || payment.amount || 100;
+  user.paymentAmount = Math.round((payment.amount || 0) / 100);
   user.paymentAt = new Date();
   user.paymentId = paymentId;
   await user.save();
-
-  console.log("[complete-payment] payment recorded", {
-    userType,
-    userId,
-    paymentId,
-  });
 
   return res.json(
     new ApiResponse(

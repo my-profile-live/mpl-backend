@@ -5,25 +5,12 @@ const userTypeEnum = z.enum(["company", "jobseeker"]);
 /* NOTE: validate.js parses req.body directly (no { body } wrapper). */
 export const createSignupOrderSchema = z.object({
   userType: userTypeEnum,
+  customerName: z.string().trim().min(1).max(100).optional(),
+  customerEmail: z.string().trim().email().max(200).optional(),
+  customerPhone: z.string().trim().min(10).max(20).optional(),
 });
 
-export const verifySignupPaymentSchema = z
-  .object({
-    userType: userTypeEnum,
-    orderId: z.string().optional(),
-    razorpay_order_id: z.string().optional(),
-    razorpay_payment_id: z.string().optional(),
-    razorpay_signature: z.string().optional(),
-  })
-  .refine(
-    (v) =>
-      v.orderId ||
-      (v.razorpay_order_id &&
-        v.razorpay_payment_id &&
-        v.razorpay_signature),
-    {
-      message:
-        "Provide either orderId (dummy mode) or razorpay_order_id + razorpay_payment_id + razorpay_signature.",
-      path: ["orderId"],
-    }
-  );
+export const verifySignupPaymentSchema = z.object({
+  userType: userTypeEnum,
+  orderId: z.string().trim().min(1),
+});

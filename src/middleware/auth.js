@@ -26,6 +26,10 @@ export async function protect(req, res, next) {
     throw new ApiError(401, "Invalid or expired token.");
   }
 
+  if (decoded.role !== "company" && decoded.role !== "jobseeker") {
+    throw new ApiError(401, "Invalid or expired token.");
+  }
+
   const Model = decoded.role === "company" ? Company : JobSeeker;
   const doc = await Model.findById(decoded.id);
   if (!doc) throw new ApiError(401, "Account no longer exists.");

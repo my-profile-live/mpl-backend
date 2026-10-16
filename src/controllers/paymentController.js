@@ -1,23 +1,28 @@
-import crypto from "crypto";
-import { getRazorpay, isRazorpayEnabled } from "../config/razorpay.js";
+import {
+  createCashfreeOrder,
+  fetchCashfreeOrder,
+  isPaidOrder,
+  paymentMode,
+  checkoutReturnUrl,
+  normalizeIndianPhone,
+  cashfreeConfig,
+} from "../config/cashfree.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import SignupPayment from "../models/SignupPayment.js";
 
 /**
- * Signup verification fee, in paise (Razorpay wants the smallest currency
- * unit — paise for INR).
+ * Signup verification fee, in paise.
  *
  *   ₹1  = 100   paise
  *   ₹99 = 9900  paise
  *
- * Keep this map as the single source of truth for the amount on the backend.
- * The frontend mirrors it in PaymentStep.jsx.
+ * The frontend mirrors this in PaymentStep.jsx.
  */
 const SIGNUP_FEE_PAISE = {
-  company: 9900,    // ₹99
-  jobseeker: 100,   // ₹1
+  company: 9900,
+  jobseeker: 100,
 };
 
 function getSignupFeePaise(userType) {
@@ -28,19 +33,26 @@ function getSignupFeePaise(userType) {
   return amount;
 }
 
+function customerIdFromPhone(phone) {
+  return `mpl${phone}`;
+}
+
 /* ─────────────────────── CREATE ORDER ─────────────────────── */
 
 export const createSignupOrder = asyncHandler(async (req, res) => {
-  const { userType } = req.body;
+  const { userType, customerName, customerEmail, customerPhone } = req.body;
 
   if (!["company", "jobseeker"].includes(userType)) {
     throw new ApiError(400, "userType must be 'company' or 'jobseeker'.");
   }
 
   const amountPaise = getSignupFeePaise(userType);
+  const mode = paymentMode();
+  if (mode === "unavailable") {
+    throw new ApiError(503, "Payments are temporarily unavailable.");
+  }
 
-  /* ─── Dummy mode ─── */
-  if (!isRazorpayEnabled()) {
+  if (mode === "dummy") {
     const orderId = `dummy_order_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -54,27 +66,55 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
     );
   }
 
-  /* ─── Real Razorpay order ─── */
-  const razorpay = getRazorpay();
+  const phone = normalizeIndianPhone(customerPhone);
+  const email = String(customerEmail || "").trim().toLowerCase();
+  const name = String(customerName || "").trim().slice(0, 100);
+  if (!phone || !email || !name) {
+    throw new ApiError(
+      400,
+      "Name, email, and a valid 10-digit mobile number are required to pay."
+    );
+  }
 
-  const order = await razorpay.orders.create({
+  let order;
+  try {
+    order = await createCashfreeOrder({
+      amountRupees: amountPaise / 100,
+      customerId: customerIdFromPhone(phone),
+      customerName: name,
+      customerEmail: email,
+      customerPhone: phone,
+      returnUrl: checkoutReturnUrl("/complete-payment"),
+      note: `MPL ${userType} verification`,
+    });
+  } catch (err) {
+    throw new ApiError(err.statusCode || 502, err.message || "Could not start payment.");
+  }
+
+  await SignupPayment.create({
+    userType,
+    orderId: order.order_id,
+    paymentId: order.order_id,
     amount: amountPaise,
-    currency: "INR",
-    receipt: `signup_${userType}_${Date.now()}`,
-    notes: { userType, purpose: "signup" },
+    status: "created",
+    dummy: false,
+    customerEmail: email,
+    customerPhone: phone,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   });
 
-  console.log("[razorpay] order created:", order.id, `₹${amountPaise / 100}`);
+  console.log("[cashfree] signup order created:", order.order_id, `₹${amountPaise / 100}`);
 
   return res.json(
     new ApiResponse(
       200,
       {
         dummy: false,
-        orderId: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        keyId: process.env.RAZORPAY_KEY_ID,
+        orderId: order.order_id,
+        paymentSessionId: order.payment_session_id,
+        environment: cashfreeConfig().environment,
+        amount: amountPaise,
+        currency: "INR",
       },
       "Order created."
     )
@@ -84,22 +124,22 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
 /* ─────────────────────── VERIFY PAYMENT ─────────────────────── */
 
 export const verifySignupPayment = asyncHandler(async (req, res) => {
-  const {
-    userType,
-    orderId,
-    razorpay_order_id,
-    razorpay_payment_id,
-    razorpay_signature,
-  } = req.body;
+  const { userType, orderId } = req.body;
 
   if (!["company", "jobseeker"].includes(userType)) {
     throw new ApiError(400, "userType must be 'company' or 'jobseeker'.");
   }
+  if (!orderId) {
+    throw new ApiError(400, "orderId is required.");
+  }
 
   const amountPaise = getSignupFeePaise(userType);
+  const mode = paymentMode();
+  if (mode === "unavailable") {
+    throw new ApiError(503, "Payments are temporarily unavailable.");
+  }
 
-  /* ─── Dummy mode ─── */
-  if (!isRazorpayEnabled()) {
+  if (mode === "dummy") {
     const dummyOrderId = orderId || `dummy_order_${Date.now()}`;
     const dummyPaymentId = `dummy_pay_${Date.now()}`;
 
@@ -126,46 +166,35 @@ export const verifySignupPayment = asyncHandler(async (req, res) => {
     );
   }
 
-  /* ─── Real mode — HMAC signature check ─── */
-  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-    throw new ApiError(
-      400,
-      "razorpay_order_id, razorpay_payment_id and razorpay_signature are required."
-    );
+  const record = await SignupPayment.findOne({ orderId, userType });
+  if (!record) {
+    throw new ApiError(400, "Payment order was not found.");
   }
 
-  const expected = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-    .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-    .digest("hex");
+  if (record.status !== "paid") {
+    let remote;
+    try {
+      remote = await fetchCashfreeOrder(orderId);
+    } catch (err) {
+      throw new ApiError(err.statusCode || 502, err.message || "Could not confirm payment.");
+    }
 
-  if (expected !== razorpay_signature) {
-    console.error("[razorpay] signature mismatch", {
-      expected,
-      received: razorpay_signature,
-    });
-    throw new ApiError(400, "Payment verification failed. Invalid signature.");
+    if (!isPaidOrder(remote, record.amount)) {
+      throw new ApiError(400, "Payment was not completed.");
+    }
+
+    record.status = "paid";
+    await record.save();
+    console.log("[cashfree] signup payment verified:", orderId);
   }
-
-  await SignupPayment.create({
-    userType,
-    orderId: razorpay_order_id,
-    paymentId: razorpay_payment_id,
-    amount: amountPaise,
-    status: "paid",
-    dummy: false,
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-  });
-
-  console.log("[razorpay] payment verified:", razorpay_payment_id);
 
   return res.json(
     new ApiResponse(
       200,
       {
         signupPayment: true,
-        paymentId: razorpay_payment_id,
-        orderId: razorpay_order_id,
+        paymentId: record.paymentId,
+        orderId: record.orderId,
       },
       "Payment verified."
     )

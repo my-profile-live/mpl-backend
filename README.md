@@ -87,7 +87,7 @@ Filterable (`?filter=view|save|shortlist|contact`), paginated.
 ### Plans — `/api/plans` (mirrors `src/data/plans.js` on the frontend exactly)
 - `GET /` — plan list for the caller's role + extra-lead pricing
 - `GET /my-subscription`
-- `POST /subscribe` `{ planId }` — dummy activation (no payment gateway wired up yet; plug in Razorpay/Stripe before going live)
+- `POST /subscribe` `{ planId }` — plan checkout uses Cashfree redirect (`CASHFREE_APP_ID` / `CASHFREE_SECRET_KEY`)
 - `POST /buy-extra-leads` `{ count }`
 
 ## Data model notes

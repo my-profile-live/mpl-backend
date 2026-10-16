@@ -104,6 +104,7 @@ export async function jobSeekerDashboard(req, res) {
   res.json(
     new ApiResponse(200, {
       completion: req.userDoc.profileCompletion,
+      leadsRemaining: req.userDoc.leadsRemaining ?? 0,
       plan: computePlanState(req.userDoc),
       stats: {
         profileViews: viewCompanies.length,

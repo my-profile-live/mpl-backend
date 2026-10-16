@@ -24,6 +24,13 @@ const interactionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-interactionSchema.index({ company: 1, jobSeeker: 1, type: 1, direction: 1 });
+interactionSchema.index(
+  { company: 1, jobSeeker: 1, type: 1, direction: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { type: { $in: ["save", "shortlist", "contact"] } },
+    name: "uniq_company_seeker_action",
+  }
+);
 
 export default mongoose.model("Interaction", interactionSchema);

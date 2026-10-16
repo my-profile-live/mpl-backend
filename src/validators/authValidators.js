@@ -330,14 +330,16 @@ export const verifyMobileLoginOtpSchema = z.object({
   otp: z.string().length(4, "OTP must be 4 digits"),
 });
 
+const objectId = z.string().regex(/^[a-f\d]{24}$/i, "Invalid id");
+
 export const verifySignupOtpSchema = z.object({
-  pendingSignupId: z.string().min(1),
+  pendingSignupId: objectId,
   channel: z.enum(["mobile", "email"]),
   otp: z.string().min(4).max(6),
 });
 
 export const resendOtpSchema = z.object({
-  pendingSignupId: z.string().min(1),
+  pendingSignupId: objectId,
   channel: z.enum(["mobile", "email"]),
 });
 

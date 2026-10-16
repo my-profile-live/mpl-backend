@@ -31,6 +31,8 @@ const jobSeekerSchema = new mongoose.Schema(
   {
     // ── Personal ──────────────────────────────────────
     fullName: { type: String, required: true, trim: true },
+    /** Public share handle, e.g. himanshu-kapuriya-k7m2. Never the database id. */
+    publicSlug: { type: String, unique: true, sparse: true, index: true },
     photo: { type: String, default: null },
     mobileNumber: { type: String, required: true, unique: true, index: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },

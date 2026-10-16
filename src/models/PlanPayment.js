@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 /**
- * Records a Razorpay payment for a plan upgrade or an extra-leads top-up.
+ * Records a Cashfree payment for a plan upgrade or an extra-leads top-up.
  * Separate from SignupPayment so we can audit the two flows independently.
  */
 const planPaymentSchema = new mongoose.Schema(

@@ -16,6 +16,11 @@ const signupPaymentSchema = new mongoose.Schema(
       default: "paid",
     },
     dummy: { type: Boolean, default: false },
+    /** Payer details captured when the Cashfree order was created. */
+    customerEmail: { type: String, default: null },
+    customerPhone: { type: String, default: null },
+    /** Set once a user account consumes this payment, so it cannot be reused. */
+    consumedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
 
     /**
      * TTL — the payment record auto-expires after 1 hour.

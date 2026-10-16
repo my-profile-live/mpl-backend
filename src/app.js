@@ -9,10 +9,15 @@ import mongoSanitize from "express-mongo-sanitize";
 import path from "path";
 import apiRoutes from "./routes/index.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
+import StoredImage from "./models/StoredImage.js";
 
 const app = express();
 
-app.set("trust proxy", 1);
+/* Trust X-Forwarded-For only in production, behind one proxy.
+   Enabling it locally lets clients pick a new rate-limit key per request. */
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 
 /* ─────────── CORS ─────────── */
 
@@ -22,9 +27,12 @@ const STATIC_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://127.0.0.1:5173",
   "http://127.0.0.1:3000",
-  "http://10.231.40.193:5173",
-  "https://mpl-frontend-liart.vercel.app",   // ← your deployed frontend (no trailing slash!)
+  "https://mpl-frontend-liart.vercel.app",
 ];
+
+if (process.env.NODE_ENV !== "production") {
+  STATIC_ALLOWED_ORIGINS.push("http://10.231.40.193:5173");
+}
 
 /* Also read from env — comma-separated list, e.g.
    CLIENT_URL="https://app.example.com,https://staging.example.com" */
@@ -39,7 +47,12 @@ const ALLOWED_ORIGINS = [
 
 console.log("[CORS] Allowed origins:", ALLOWED_ORIGINS);
 
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false,
+  })
+);
 
 app.use(
   cors({
@@ -53,16 +66,18 @@ app.use(
         return callback(null, true);
       }
 
-      /* Allow any *.onrender.com / *.vercel.app preview URLs (optional) */
+      /* Preview hosts are allowed only outside production.
+         The deployed frontend is listed explicitly above. */
       if (
-        /^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(cleanOrigin) ||
-        /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(cleanOrigin)
+        process.env.NODE_ENV !== "production" &&
+        (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(cleanOrigin) ||
+          /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(cleanOrigin))
       ) {
         return callback(null, true);
       }
 
       console.warn("[CORS] Blocked origin:", cleanOrigin);
-      return callback(new Error(`CORS blocked: ${cleanOrigin}`));
+      return callback(null, false);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -77,8 +92,32 @@ app.use(cookieParser());
 app.use(mongoSanitize());
 if (process.env.NODE_ENV !== "test") app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
-// Static file serving for uploaded photos / logos.
-app.use("/uploads", express.static(path.resolve("uploads")));
+app.get("/uploads/:name", async (req, res, next) => {
+  const id = String(req.params.name || "").replace(/\.webp$/i, "");
+  if (!/^[A-Za-z0-9_-]{8,32}$/.test(id)) return next();
+  const image = await StoredImage.findById(id).select("data contentType").lean();
+  if (!image?.data) return next();
+  const body = Buffer.isBuffer(image.data) ? image.data : Buffer.from(image.data.buffer);
+  res.setHeader("Content-Type", image.contentType || "image/webp");
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.send(body);
+});
+
+app.use(
+  "/uploads",
+  express.static(path.resolve("uploads"), {
+    dotfiles: "deny",
+    index: false,
+    maxAge: "7d",
+    setHeaders(res) {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  })
+);
 
 app.use("/api", apiRoutes);
 

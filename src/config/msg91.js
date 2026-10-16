@@ -63,10 +63,7 @@ export async function sendMobileOtp(mobile) {
     }),
   });
 
-  /* 🩺 Log the raw response so we can see MSG91's real error text. */
   const rawText = await res.text();
-  console.log("[msg91] sendOtp status:", res.status);
-  console.log("[msg91] sendOtp raw body:", rawText);
 
   let json = {};
   try {
@@ -76,13 +73,8 @@ export async function sendMobileOtp(mobile) {
   }
 
   if (!res.ok || json?.type === "error") {
-    const msg =
-      json?.message ||
-      json?.errors?.[0]?.message ||
-      json?.errors ||
-      rawText ||
-      `MSG91 send failed (${res.status})`;
-    throw new Error(msg);
+    console.error("[msg91] sendOtp failed", res.status);
+    throw new Error(`MSG91 send failed (${res.status})`);
   }
 
   /* Widget API returns the request id under `message`, not `reqId`.
@@ -90,14 +82,11 @@ export async function sendMobileOtp(mobile) {
   const reqId = json?.reqId || json?.message;
 
   if (!reqId || typeof reqId !== "string") {
-    throw new Error(
-      `MSG91 did not return a request id. Body: ${rawText.slice(0, 200)}`
-    );
+    console.error("[msg91] sendOtp missing request id", res.status);
+    throw new Error("MSG91 did not return a request id.");
   }
 
   return reqId;
-
-  return json.reqId;
 }
 
 /* ────────────────────────── VERIFY OTP ────────────────────────── */
@@ -121,8 +110,6 @@ export async function checkMobileOtp(reqId, code) {
   });
 
   const rawText = await res.text();
-  console.log("[msg91] verifyOtp status:", res.status);
-  console.log("[msg91] verifyOtp raw body:", rawText);
 
   let json = {};
   try {

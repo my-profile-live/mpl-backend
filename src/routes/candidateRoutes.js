@@ -11,6 +11,9 @@ router.get("/", candidates.listCandidates);              // browsing allowed (se
 router.get("/search", candidates.searchCandidates);      // browsing allowed
 router.get("/saved", candidates.listSavedCandidates);    // own data — allowed
 router.get("/shortlisted", candidates.listShortlistedCandidates); // own data — allowed
+router.get("/by-slug/:slug", candidates.getCandidateBySlug);
+router.post("/by-slug/:slug/contact", requireActivePlan, candidates.contactCandidateBySlug);
+router.post("/:id/share-link", candidates.ensureCandidateShareLink);
 router.get("/:id", candidates.getCandidate);             // preview allowed
 
 /* ─── Mutating actions — blocked when plan hard-expired ─── */

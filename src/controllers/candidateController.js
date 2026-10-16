@@ -1,14 +1,17 @@
 import JobSeeker from "../models/JobSeeker.js";
+import Company from "../models/Company.js";
 import Interaction from "../models/Interaction.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { assertObjectId } from "../utils/objectId.js";
+import { ensurePublicSlug, PUBLIC_SLUG_RE } from "../utils/publicSlug.js";
 
 const PUBLIC_FIELDS =
   "fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
   "expectedSalary noticePeriod preferredIndustry preferredJobState preferredJobCity jobType wfh " +
   "languagesKnown employmentHistory education skills hobbies willingToTravel readyToRelocate " +
   "immediateJoining state district city pinCode about gender profileCompletion status createdAt " +
-  "mobileNumber email";
+  "mobileNumber email publicSlug";
 
 
 const PUBLIC_SHARE_FIELDS =
@@ -36,6 +39,32 @@ function maskContactInfo(candidateObj, isContacted) {
     mobileNumber: maskMobile(candidateObj.mobileNumber),
     email: maskEmail(candidateObj.email),
   };
+}
+
+/** Company-initiated contact only. A job seeker unlocking the company must not reveal the candidate. */
+const COMPANY_CONTACT = {
+  type: "contact",
+  direction: { $ne: "jobseeker_to_company" },
+};
+
+async function contactedIdSet(companyId, jobSeekerIds) {
+  const query = { company: companyId, ...COMPANY_CONTACT };
+  if (jobSeekerIds) query.jobSeeker = { $in: jobSeekerIds };
+  const ids = await Interaction.find(query).distinct("jobSeeker");
+  return new Set(ids.map(String));
+}
+
+function presentCandidate(doc, contactedIds) {
+  const obj = doc.toObject ? doc.toObject() : doc;
+  const isContacted = contactedIds.has(String(obj._id));
+  return { ...maskContactInfo(obj, isContacted), isContacted };
+}
+
+async function requireCandidate(id) {
+  assertObjectId(id, "candidate id");
+  const candidate = await JobSeeker.findById(id).select(PUBLIC_FIELDS);
+  if (!candidate) throw new ApiError(404, "Candidate not found.");
+  return candidate;
 }
 
 /** Builds a Mongo filter object from FilterSidebar.jsx's query params. */
@@ -113,17 +142,8 @@ export async function listCandidates(req, res) {
     JobSeeker.countDocuments(filter),
   ]);
 
-  const contactedIds = new Set(
-    (await Interaction.find({ company: req.user.id, type: "contact" }).distinct("jobSeeker")).map(String)
-  );
-
-const results = candidates.map((c) => {
-  const contacted = contactedIds.has(c._id.toString());
-  return {
-    ...maskContactInfo(c.toObject(), contacted),
-    isContacted: contacted,
-  };
-});
+  const contactedIds = await contactedIdSet(req.user.id);
+  const results = candidates.map((c) => presentCandidate(c, contactedIds));
 
   res.json(
     new ApiResponse(200, {
@@ -138,15 +158,14 @@ const results = candidates.map((c) => {
 
 /** GET /api/candidates/:id — detail view. Logs a "view" interaction. */
 export async function getCandidate(req, res) {
-  const candidate = await JobSeeker.findById(req.params.id).select(PUBLIC_FIELDS);
-  if (!candidate) throw new ApiError(404, "Candidate not found.");
+  const candidate = await requireCandidate(req.params.id);
 
   await Interaction.create({ company: req.user.id, jobSeeker: candidate._id, type: "view" });
 
   const isContacted = !!(await Interaction.exists({
     company: req.user.id,
     jobSeeker: candidate._id,
-    type: "contact",
+    ...COMPANY_CONTACT,
   }));
   const [isSaved, isShortlisted] = await Promise.all([
     Interaction.exists({ company: req.user.id, jobSeeker: candidate._id, type: "save" }),
@@ -166,53 +185,104 @@ export async function getCandidate(req, res) {
 /** POST /api/candidates/:id/save — toggles save. */
 export async function toggleSaveCandidate(req, res) {
   const jobSeeker = req.params.id;
+  await requireCandidate(jobSeeker);
   const existing = await Interaction.findOne({ company: req.user.id, jobSeeker, type: "save" });
 
   if (existing) {
     await existing.deleteOne();
     return res.json(new ApiResponse(200, { saved: false }, "Removed from saved candidates."));
   }
-  await Interaction.create({ company: req.user.id, jobSeeker, type: "save" });
+  try {
+    await Interaction.create({ company: req.user.id, jobSeeker, type: "save" });
+  } catch (err) {
+    if (err?.code !== 11000) throw err;
+  }
   res.json(new ApiResponse(200, { saved: true }, "Candidate saved."));
 }
 
 /** POST /api/candidates/:id/shortlist — toggles shortlist. */
 export async function toggleShortlistCandidate(req, res) {
   const jobSeeker = req.params.id;
+  await requireCandidate(jobSeeker);
   const existing = await Interaction.findOne({ company: req.user.id, jobSeeker, type: "shortlist" });
 
   if (existing) {
     await existing.deleteOne();
     return res.json(new ApiResponse(200, { shortlisted: false }, "Removed from shortlist."));
   }
-  await Interaction.create({ company: req.user.id, jobSeeker, type: "shortlist" });
+  try {
+    await Interaction.create({ company: req.user.id, jobSeeker, type: "shortlist" });
+  } catch (err) {
+    if (err?.code !== 11000) throw err;
+  }
   res.json(new ApiResponse(200, { shortlisted: true }, "Candidate shortlisted."));
 }
 
 /** POST /api/candidates/:id/contact — spends 1 lead to reveal contact details. */
 export async function contactCandidate(req, res) {
   const jobSeeker = req.params.id;
-  const company = req.userDoc;
+  const candidate = await requireCandidate(jobSeeker);
+  const companyId = req.userDoc._id;
 
-  const already = await Interaction.exists({ company: company._id, jobSeeker, type: "contact" });
+  const already = await Interaction.exists({
+    company: companyId,
+    jobSeeker,
+    ...COMPANY_CONTACT,
+  });
   if (already) {
-    const candidate = await JobSeeker.findById(jobSeeker).select(PUBLIC_FIELDS);
-    return res.json(new ApiResponse(200, { candidate: candidate.toObject(), leadsRemaining: company.leadsRemaining }, "Already contacted."));
+    const fresh = await Company.findById(companyId).select("leadsRemaining");
+    return res.json(
+      new ApiResponse(
+        200,
+        { candidate: candidate.toObject(), leadsRemaining: fresh?.leadsRemaining ?? 0 },
+        "Already contacted."
+      )
+    );
   }
 
-  if (company.leadsRemaining <= 0) {
+  /* Record the unlock before charging so two clicks cannot spend two leads. */
+  try {
+    await Interaction.create({
+      company: companyId,
+      jobSeeker,
+      type: "contact",
+      direction: "company_to_jobseeker",
+    });
+  } catch (err) {
+    if (err?.code === 11000) {
+      const fresh = await Company.findById(companyId).select("leadsRemaining");
+      return res.json(
+        new ApiResponse(
+          200,
+          { candidate: candidate.toObject(), leadsRemaining: fresh?.leadsRemaining ?? 0 },
+          "Already contacted."
+        )
+      );
+    }
+    throw err;
+  }
+
+  const updated = await Company.findOneAndUpdate(
+    { _id: companyId, leadsRemaining: { $gt: 0 } },
+    { $inc: { leadsRemaining: -1 } },
+    { new: true }
+  );
+  if (!updated) {
+    await Interaction.deleteOne({
+      company: companyId,
+      jobSeeker,
+      type: "contact",
+      direction: "company_to_jobseeker",
+    });
     throw new ApiError(402, "You have no leads remaining. Please upgrade your plan to contact more candidates.");
   }
 
-  const candidate = await JobSeeker.findById(jobSeeker).select(PUBLIC_FIELDS);
-  if (!candidate) throw new ApiError(404, "Candidate not found.");
-
-  await Interaction.create({ company: company._id, jobSeeker, type: "contact" });
-  company.leadsRemaining -= 1;
-  await company.save();
-
   res.json(
-    new ApiResponse(200, { candidate: candidate.toObject(), leadsRemaining: company.leadsRemaining }, "Contact details unlocked.")
+    new ApiResponse(
+      200,
+      { candidate: candidate.toObject(), leadsRemaining: updated.leadsRemaining },
+      "Contact details unlocked."
+    )
   );
 }
 
@@ -222,7 +292,12 @@ export async function listSavedCandidates(req, res) {
     .sort({ createdAt: -1 })
     .populate({ path: "jobSeeker", select: PUBLIC_FIELDS });
 
-  res.json(new ApiResponse(200, { results: saves.map((s) => s.jobSeeker).filter(Boolean) }));
+  const docs = saves.map((s) => s.jobSeeker).filter(Boolean);
+  const contactedIds = await contactedIdSet(
+    req.user.id,
+    docs.map((d) => d._id)
+  );
+  res.json(new ApiResponse(200, { results: docs.map((d) => presentCandidate(d, contactedIds)) }));
 }
 
 /** GET /api/candidates/shortlisted — company's shortlisted candidates list. */
@@ -231,7 +306,12 @@ export async function listShortlistedCandidates(req, res) {
     .sort({ createdAt: -1 })
     .populate({ path: "jobSeeker", select: PUBLIC_FIELDS });
 
-  res.json(new ApiResponse(200, { results: items.map((i) => i.jobSeeker).filter(Boolean) }));
+  const docs = items.map((i) => i.jobSeeker).filter(Boolean);
+  const contactedIds = await contactedIdSet(
+    req.user.id,
+    docs.map((d) => d._id)
+  );
+  res.json(new ApiResponse(200, { results: docs.map((d) => presentCandidate(d, contactedIds)) }));
 }
 
 
@@ -307,23 +387,8 @@ export async function searchCandidates(req, res) {
     JobSeeker.countDocuments(filter),
   ]);
 
-  /* Mask contact details for candidates not yet contacted */
-  const contactedIds = new Set(
-    (
-      await Interaction.find({
-        company: req.user.id,
-        type: "contact",
-      }).distinct("jobSeeker")
-    ).map(String)
-  );
-
-const results = candidates.map((c) => {
-  const contacted = contactedIds.has(c._id.toString());
-  return {
-    ...maskContactInfo(c.toObject(), contacted),
-    isContacted: contacted,
-  };
-});
+  const contactedIds = await contactedIdSet(req.user.id);
+  const results = candidates.map((c) => presentCandidate(c, contactedIds));
 
   res.json(
     new ApiResponse(200, {
@@ -337,19 +402,121 @@ const results = candidates.map((c) => {
   );
 }
 
-export async function getPublicProfile(req, res) {
-  const { id } = req.params;
-
-  /* Validate ObjectId so a bad URL doesn't 500 */
-  if (!id || !id.match(/^[a-f\d]{24}$/i)) {
-    throw new ApiError(404, "Profile not found.");
+function readSlug(value) {
+  const slug = String(value || "").trim().toLowerCase();
+  if (
+    !PUBLIC_SLUG_RE.test(slug) ||
+    slug.length > 80 ||
+    /^[a-f0-9]{24}$/.test(slug)
+  ) {
+    return null;
   }
+  return slug;
+}
 
-  const candidate = await JobSeeker.findById(id)
-    .select(PUBLIC_SHARE_FIELDS)
+/** Fields a stranger is allowed to see. Contact and account data never leave this list. */
+function toPublicProfile(doc) {
+  const src = doc || {};
+  const history = Array.isArray(src.employmentHistory)
+    ? src.employmentHistory.map((job) => ({
+        companyName: job.companyName || "",
+        designation: job.designation || "",
+        joiningDate: job.joiningDate || "",
+        leavingDate: job.leavingDate || "",
+        experience: job.experience || "",
+        responsibilities: job.responsibilities || "",
+      }))
+    : [];
+  const education = Array.isArray(src.education)
+    ? src.education.map((item) => ({
+        qualification: item.qualification || "",
+        specialization: item.specialization || "",
+        college: item.college || "",
+        university: item.university || "",
+        passingYear: item.passingYear || "",
+        percentage: item.percentage || "",
+      }))
+    : [];
+
+  return {
+    publicSlug: src.publicSlug,
+    fullName: src.fullName,
+    photo: src.photo || null,
+    currentJobTitle: src.currentJobTitle || "",
+    currentCompany: src.currentCompany || "",
+    totalExperience: src.totalExperience || "",
+    relevantExperience: src.relevantExperience || "",
+    expectedSalary: src.expectedSalary || "",
+    noticePeriod: src.noticePeriod || "",
+    preferredIndustry: src.preferredIndustry || "",
+    jobType: src.jobType || "",
+    wfh: src.wfh || "",
+    languagesKnown: src.languagesKnown || [],
+    skills: src.skills || [],
+    hobbies: src.hobbies || [],
+    willingToTravel: !!src.willingToTravel,
+    readyToRelocate: !!src.readyToRelocate,
+    immediateJoining: !!src.immediateJoining,
+    state: src.state || "",
+    district: src.district || "",
+    city: src.city || "",
+    about: src.about || "",
+    gender: src.gender || "",
+    employmentHistory: history,
+    education,
+    isEmailVerified: !!src.isEmailVerified,
+    isMobileVerified: !!src.isMobileVerified,
+  };
+}
+
+export async function getPublicProfile(req, res) {
+  const slug = readSlug(req.params.slug);
+  if (!slug) throw new ApiError(404, "Profile not found.");
+
+  const candidate = await JobSeeker.findOne({
+    publicSlug: slug,
+    status: { $ne: "Inactive" },
+  })
+    .select(
+      "publicSlug fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
+        "expectedSalary noticePeriod preferredIndustry jobType wfh languagesKnown skills hobbies " +
+        "willingToTravel readyToRelocate immediateJoining state district city about gender " +
+        "employmentHistory education isEmailVerified isMobileVerified"
+    )
     .lean();
 
   if (!candidate) throw new ApiError(404, "Profile not found.");
 
-  res.json(new ApiResponse(200, { profile: candidate }));
+  res.json(new ApiResponse(200, { profile: toPublicProfile(candidate) }));
+}
+
+/** GET /api/candidates/by-slug/:slug — company view. Contact stays masked until unlocked. */
+export async function getCandidateBySlug(req, res) {
+  const slug = readSlug(req.params.slug);
+  if (!slug) throw new ApiError(404, "Profile not found.");
+
+  const candidate = await JobSeeker.findOne({ publicSlug: slug }).select(PUBLIC_FIELDS);
+  if (!candidate) throw new ApiError(404, "Candidate not found.");
+
+  const contactedIds = await contactedIdSet(req.user.id, [candidate._id]);
+  res.json(new ApiResponse(200, { candidate: presentCandidate(candidate, contactedIds) }));
+}
+
+/** POST /api/candidates/by-slug/:slug/contact — same lead spend as contact by id. */
+export async function contactCandidateBySlug(req, res) {
+  const slug = readSlug(req.params.slug);
+  if (!slug) throw new ApiError(404, "Profile not found.");
+
+  const candidate = await JobSeeker.findOne({ publicSlug: slug }).select("_id");
+  if (!candidate) throw new ApiError(404, "Candidate not found.");
+
+  req.params.id = String(candidate._id);
+  return contactCandidate(req, res);
+}
+
+/** POST /api/candidates/:id/share-link — creates the short public URL if needed. */
+export async function ensureCandidateShareLink(req, res) {
+  const candidate = await requireCandidate(req.params.id);
+  const slug = await ensurePublicSlug(candidate._id, candidate.fullName);
+  res.json(new ApiResponse(200, { slug }, "Share link ready."));
 }

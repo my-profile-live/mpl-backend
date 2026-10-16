@@ -18,11 +18,42 @@ import * as auth from "../controllers/authController.js";
 
 const router = Router();
 
+const limiterMessage = {
+  success: false,
+  statusCode: 429,
+  message: "Too many requests. Please try again later.",
+};
+
 const otpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  message: limiterMessage,
+});
+
+const otpVerifyLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+});
+
+const lookupLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
 });
 
 function attachUploadedUrl(req, res, next) {
@@ -49,6 +80,7 @@ router.post(
 );
 router.post(
   "/signup/verify-otp",
+  otpVerifyLimiter,
   validate(verifySignupOtpSchema),
   auth.verifySignupOtp
 );
@@ -59,8 +91,8 @@ router.post(
   auth.resendSignupOtp
 );
 
-router.post("/check-company-uniqueness", auth.checkCompanyUniqueness);
-router.post("/check-jobseeker-uniqueness", auth.checkJobSeekerUniqueness);
+router.post("/check-company-uniqueness", lookupLimiter, auth.checkCompanyUniqueness);
+router.post("/check-jobseeker-uniqueness", lookupLimiter, auth.checkJobSeekerUniqueness);
 
 /* Login */
 router.post(
@@ -71,10 +103,11 @@ router.post(
 );
 router.post(
   "/login/mobile/verify",
+  otpVerifyLimiter,
   validate(verifyMobileLoginOtpSchema),
   auth.verifyMobileLoginOtp
 );
-router.post("/login/email", validate(emailLoginSchema), auth.loginWithEmail);
+router.post("/login/email", loginLimiter, validate(emailLoginSchema), auth.loginWithEmail);
 router.post("/logout", auth.logout);
 
 /* Password reset */
@@ -86,6 +119,7 @@ router.post(
 );
 router.post(
   "/reset-password",
+  otpVerifyLimiter,
   validate(resetPasswordSchema),
   auth.resetPassword
 );

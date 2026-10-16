@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import Interaction from "../models/Interaction.js";
 
 /**
  * Connects to MongoDB using Mongoose.
@@ -9,8 +10,31 @@ export async function connectDB() {
     mongoose.set("strictQuery", true);
     const conn = await mongoose.connect(process.env.MONGO_URI);
     console.log(`[db] MongoDB connected -> ${conn.connection.host}/${conn.connection.name}`);
+    await ensureActionIndex();
   } catch (err) {
     console.error("[db] MongoDB connection failed:", err.message);
     process.exit(1);
+  }
+}
+
+/** One unlock, save, or shortlist per company and candidate. Views can repeat. */
+async function ensureActionIndex() {
+  try {
+    const existing = await Interaction.db.db.listCollections({ name: "interactions" }).toArray();
+    if (!existing.length) await Interaction.createCollection();
+    const indexes = await Interaction.collection.indexes();
+    const legacy = indexes.find(
+      (index) => index.name === "company_1_jobSeeker_1_type_1_direction_1" && !index.unique
+    );
+    if (legacy) await Interaction.collection.dropIndex(legacy.name);
+    await Interaction.syncIndexes();
+  } catch (err) {
+    console.error("[db] Could not enforce unique action index:", err.message);
+    await Interaction.collection
+      .createIndex(
+        { company: 1, jobSeeker: 1, type: 1, direction: 1 },
+        { name: "company_1_jobSeeker_1_type_1_direction_1" }
+      )
+      .catch(() => {});
   }
 }

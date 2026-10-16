@@ -1,10 +1,95 @@
-import crypto from "crypto";
 import Subscription from "../models/Subscription.js";
 import PlanPayment from "../models/PlanPayment.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { getPlansForUser, getPlanById, EXTRA_LEAD_PRICING } from "../data/plans.js";
-import { getRazorpay, isRazorpayEnabled } from "../config/razorpay.js";
+import {
+  createCashfreeOrder,
+  fetchCashfreeOrder,
+  isPaidOrder,
+  paymentMode,
+  checkoutReturnUrl,
+  normalizeIndianPhone,
+  cashfreeConfig,
+} from "../config/cashfree.js";
+
+function payerFromUser(user, userType) {
+  const phone = normalizeIndianPhone(user.mobileNumber);
+  const email = String(user.email || user.companyEmail || "")
+    .trim()
+    .toLowerCase();
+  const name = String(
+    userType === "company"
+      ? user.contactPersonName || user.companyName
+      : user.fullName || ""
+  )
+    .trim()
+    .slice(0, 100);
+
+  if (!phone || !email || !name) {
+    throw new ApiError(
+      400,
+      "Name, email, and a valid 10-digit mobile number are required to pay."
+    );
+  }
+
+  return {
+    phone,
+    email,
+    name,
+    customerId: `mpl${String(user._id)}`,
+  };
+}
+
+async function openCheckout({ amountPaise, payer, returnPath, note }) {
+  try {
+    return await createCashfreeOrder({
+      amountRupees: amountPaise / 100,
+      customerId: payer.customerId,
+      customerName: payer.name,
+      customerEmail: payer.email,
+      customerPhone: payer.phone,
+      returnUrl: checkoutReturnUrl(returnPath),
+      note,
+    });
+  } catch (err) {
+    throw new ApiError(err.statusCode || 502, err.message || "Could not start payment.");
+  }
+}
+
+function checkoutPayload(order, extra) {
+  return {
+    dummy: false,
+    orderId: order.order_id,
+    paymentSessionId: order.payment_session_id,
+    environment: cashfreeConfig().environment,
+    currency: "INR",
+    ...extra,
+  };
+}
+
+/** Returns true only for the request that first confirms a paid order. */
+async function claimPaidRecord(record) {
+  if (record.status === "paid") return false;
+
+  let remote;
+  try {
+    remote = await fetchCashfreeOrder(record.orderId);
+  } catch (err) {
+    throw new ApiError(err.statusCode || 502, err.message || "Could not confirm payment.");
+  }
+
+  if (!isPaidOrder(remote, record.amount)) {
+    throw new ApiError(400, "Payment was not completed.");
+  }
+
+  const won = await PlanPayment.findOneAndUpdate(
+    { _id: record._id, status: "created" },
+    { $set: { status: "paid" } },
+    { new: true }
+  );
+  return Boolean(won);
+}
 
 /* ─────────────────────── READ ─────────────────────── */
 
@@ -37,7 +122,7 @@ export async function getMySubscription(req, res) {
 
 /**
  * POST /api/plans/checkout { planId }
- * Creates a Razorpay order for the given plan.
+ * Creates a Cashfree order for the given plan.
  */
 export async function createPlanOrder(req, res) {
   const { planId } = req.body;
@@ -50,9 +135,13 @@ export async function createPlanOrder(req, res) {
   }
 
   const amountPaise = plan.price * 100;
+  const mode = paymentMode();
+  if (mode === "unavailable") {
+    throw new ApiError(503, "Payments are temporarily unavailable.");
+  }
 
   /* ─── Dummy mode ─── */
-  if (!isRazorpayEnabled()) {
+  if (mode === "dummy") {
     const orderId = `dummy_plan_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -72,27 +161,37 @@ export async function createPlanOrder(req, res) {
     );
   }
 
-  /* ─── Real Razorpay ─── */
-  const razorpay = getRazorpay();
-  const order = await razorpay.orders.create({
+  const payer = payerFromUser(req.userDoc, userType);
+  const order = await openCheckout({
+    amountPaise,
+    payer,
+    returnPath: "/payment/return",
+    note: `MPL ${plan.label}`,
+  });
+
+  await PlanPayment.create({
+    userType,
+    user: req.userDoc._id,
+    userModel: userType === "company" ? "Company" : "JobSeeker",
+    purpose: "plan",
+    planId: plan.id,
+    orderId: order.order_id,
+    paymentId: order.order_id,
     amount: amountPaise,
     currency: "INR",
-    receipt: `plan_${userType}_${planId}_${Date.now()}`,
-    notes: { userType, planId, purpose: "plan-upgrade" },
+    status: "created",
+    dummy: false,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   });
 
   res.json(
     new ApiResponse(
       200,
-      {
-        dummy: false,
-        orderId: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        keyId: process.env.RAZORPAY_KEY_ID,
+      checkoutPayload(order, {
+        amount: amountPaise,
         planId: plan.id,
         planLabel: plan.label,
-      },
+      }),
       "Order created."
     )
   );
@@ -105,54 +204,50 @@ export async function createPlanOrder(req, res) {
  * double-charging or double-granting.
  */
 export async function verifyPlanPayment(req, res) {
-  const {
-    planId,
-    orderId,
-    razorpay_order_id,
-    razorpay_payment_id,
-    razorpay_signature,
-  } = req.body;
+  const { planId, orderId } = req.body;
 
   const userType = req.user.role;
   const user = req.userDoc;
-
-  const plan = getPlanById(userType, planId);
-  if (!plan) throw new ApiError(400, "Unknown plan.");
-
-  const amountPaise = plan.price * 100;
+  const mode = paymentMode();
+  if (mode === "unavailable") {
+    throw new ApiError(503, "Payments are temporarily unavailable.");
+  }
 
   let paymentId;
   let actualOrderId;
+  let plan;
+  let amountPaise;
+  let alreadyPaid = false;
 
   /* ─── Dummy mode ─── */
-  if (!isRazorpayEnabled()) {
+  if (mode === "dummy") {
+    plan = getPlanById(userType, planId);
+    if (!plan) throw new ApiError(400, "Unknown plan.");
+    amountPaise = plan.price * 100;
     actualOrderId = orderId || `dummy_plan_${Date.now()}`;
     paymentId = `dummy_pay_${Date.now()}`;
   } else {
-    /* ─── Real mode — HMAC check ─── */
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      throw new ApiError(
-        400,
-        "razorpay_order_id, razorpay_payment_id and razorpay_signature are required."
-      );
+    if (!orderId) throw new ApiError(400, "orderId is required.");
+
+    const record = await PlanPayment.findOne({
+      orderId,
+      user: user._id,
+      purpose: "plan",
+    });
+    if (!record) throw new ApiError(400, "Payment order was not found.");
+
+    plan = getPlanById(userType, record.planId);
+    if (!plan) throw new ApiError(400, "Unknown plan.");
+    if (planId && planId !== record.planId) {
+      throw new ApiError(400, "This payment does not match the selected plan.");
     }
-
-    const expected = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
-
-    if (expected !== razorpay_signature) {
-      throw new ApiError(400, "Payment verification failed. Invalid signature.");
-    }
-
-    actualOrderId = razorpay_order_id;
-    paymentId = razorpay_payment_id;
+    amountPaise = record.amount;
+    alreadyPaid = !(await claimPaidRecord(record));
+    actualOrderId = record.orderId;
+    paymentId = record.paymentId;
   }
 
-  /* ─── Idempotency — has this paymentId been recorded already? ─── */
-  const existing = await PlanPayment.findOne({ paymentId });
-  if (existing && existing.status === "paid") {
+  if (alreadyPaid) {
     return res.json(
       new ApiResponse(
         200,
@@ -161,27 +256,45 @@ export async function verifyPlanPayment(req, res) {
           planExpiry: user.planExpiry,
           leadsRemaining: user.leadsRemaining,
           alreadyProcessed: true,
+          purpose: "plan",
         },
         "Plan already activated."
       )
     );
   }
 
-  /* ─── Record the payment ─── */
-  await PlanPayment.create({
-    userType,
-    user: user._id,
-    userModel: userType === "company" ? "Company" : "JobSeeker",
-    purpose: "plan",
-    planId: plan.id,
-    orderId: actualOrderId,
-    paymentId,
-    amount: amountPaise,
-    currency: "INR",
-    status: "paid",
-    dummy: !isRazorpayEnabled(),
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-  });
+  if (mode === "dummy") {
+    const existing = await PlanPayment.findOne({ paymentId });
+    if (existing && existing.status === "paid") {
+      return res.json(
+        new ApiResponse(
+          200,
+          {
+            currentPlan: user.currentPlan,
+            planExpiry: user.planExpiry,
+            leadsRemaining: user.leadsRemaining,
+            alreadyProcessed: true,
+          },
+          "Plan already activated."
+        )
+      );
+    }
+
+    await PlanPayment.create({
+      userType,
+      user: user._id,
+      userModel: userType === "company" ? "Company" : "JobSeeker",
+      purpose: "plan",
+      planId: plan.id,
+      orderId: actualOrderId,
+      paymentId,
+      amount: amountPaise,
+      currency: "INR",
+      status: "paid",
+      dummy: true,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+  }
 
   /* ─── Activate the plan on the user ─── */
   const now = new Date();
@@ -214,6 +327,8 @@ export async function verifyPlanPayment(req, res) {
         planExpiry: user.planExpiry,
         leadsRemaining: user.leadsRemaining,
         paymentId,
+        purpose: "plan",
+        planLabel: plan.label,
       },
       `${plan.label} activated.`
     )
@@ -224,7 +339,7 @@ export async function verifyPlanPayment(req, res) {
 
 /**
  * POST /api/plans/extra-leads/checkout { count }
- * Creates a Razorpay order for extra-leads top-up.
+ * Creates a Cashfree order for an extra-leads top-up.
  */
 export async function createExtraLeadsOrder(req, res) {
   const count = Number(req.body.count);
@@ -240,8 +355,12 @@ export async function createExtraLeadsOrder(req, res) {
   }
 
   const amountPaise = count * pricing.perLead * 100;
+  const mode = paymentMode();
+  if (mode === "unavailable") {
+    throw new ApiError(503, "Payments are temporarily unavailable.");
+  }
 
-  if (!isRazorpayEnabled()) {
+  if (mode === "dummy") {
     const orderId = `dummy_leads_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -260,25 +379,33 @@ export async function createExtraLeadsOrder(req, res) {
     );
   }
 
-  const razorpay = getRazorpay();
-  const order = await razorpay.orders.create({
+  const payer = payerFromUser(req.userDoc, userType);
+  const order = await openCheckout({
+    amountPaise,
+    payer,
+    returnPath: "/payment/return",
+    note: `MPL ${count} extra leads`,
+  });
+
+  await PlanPayment.create({
+    userType,
+    user: req.userDoc._id,
+    userModel: userType === "company" ? "Company" : "JobSeeker",
+    purpose: "extra-leads",
+    leadsCount: count,
+    orderId: order.order_id,
+    paymentId: order.order_id,
     amount: amountPaise,
     currency: "INR",
-    receipt: `leads_${userType}_${count}_${Date.now()}`,
-    notes: { userType, count, purpose: "extra-leads" },
+    status: "created",
+    dummy: false,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   });
 
   res.json(
     new ApiResponse(
       200,
-      {
-        dummy: false,
-        orderId: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        keyId: process.env.RAZORPAY_KEY_ID,
-        count,
-      },
+      checkoutPayload(order, { amount: amountPaise, count }),
       "Order created."
     )
   );
@@ -288,13 +415,7 @@ export async function createExtraLeadsOrder(req, res) {
  * POST /api/plans/extra-leads/verify-payment
  */
 export async function verifyExtraLeadsPayment(req, res) {
-  const {
-    count,
-    orderId,
-    razorpay_order_id,
-    razorpay_payment_id,
-    razorpay_signature,
-  } = req.body;
+  const { count, orderId } = req.body;
 
   const userType = req.user.role;
   const user = req.userDoc;
@@ -302,63 +423,65 @@ export async function verifyExtraLeadsPayment(req, res) {
 
   if (!pricing) throw new ApiError(400, "Extra leads are not available for this account.");
 
-  const leadsCount = Number(count);
-  if (!leadsCount || leadsCount < pricing.minimum) {
-    throw new ApiError(400, `Minimum purchase is ${pricing.minimum} leads.`);
+  const mode = paymentMode();
+  if (mode === "unavailable") {
+    throw new ApiError(503, "Payments are temporarily unavailable.");
   }
-
-  const amountPaise = leadsCount * pricing.perLead * 100;
 
   let paymentId;
-  let actualOrderId;
+  let leadsCount;
+  let alreadyPaid = false;
 
-  if (!isRazorpayEnabled()) {
-    actualOrderId = orderId || `dummy_leads_${Date.now()}`;
+  if (mode === "dummy") {
+    leadsCount = Number(count);
+    if (!leadsCount || leadsCount < pricing.minimum) {
+      throw new ApiError(400, `Minimum purchase is ${pricing.minimum} leads.`);
+    }
+    const amountPaise = leadsCount * pricing.perLead * 100;
+    const actualOrderId = orderId || `dummy_leads_${Date.now()}`;
     paymentId = `dummy_pay_${Date.now()}`;
+
+    await PlanPayment.create({
+      userType,
+      user: user._id,
+      userModel: userType === "company" ? "Company" : "JobSeeker",
+      purpose: "extra-leads",
+      leadsCount,
+      orderId: actualOrderId,
+      paymentId,
+      amount: amountPaise,
+      currency: "INR",
+      status: "paid",
+      dummy: true,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
   } else {
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      throw new ApiError(400, "Missing payment fields.");
-    }
-    const expected = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
-    if (expected !== razorpay_signature) {
-      throw new ApiError(400, "Payment verification failed. Invalid signature.");
-    }
-    actualOrderId = razorpay_order_id;
-    paymentId = razorpay_payment_id;
+    if (!orderId) throw new ApiError(400, "orderId is required.");
+    const record = await PlanPayment.findOne({
+      orderId,
+      user: user._id,
+      purpose: "extra-leads",
+    });
+    if (!record) throw new ApiError(400, "Payment order was not found.");
+
+    leadsCount = record.leadsCount;
+    paymentId = record.paymentId;
+    alreadyPaid = !(await claimPaidRecord(record));
   }
 
-  /* Idempotency */
-  const existing = await PlanPayment.findOne({ paymentId });
-  if (existing && existing.status === "paid") {
+  if (alreadyPaid) {
     return res.json(
       new ApiResponse(
         200,
         {
           leadsRemaining: user.leadsRemaining,
           alreadyProcessed: true,
+          purpose: "extra-leads",
         },
         "Extra leads already added."
       )
     );
   }
-
-  await PlanPayment.create({
-    userType,
-    user: user._id,
-    userModel: userType === "company" ? "Company" : "JobSeeker",
-    purpose: "extra-leads",
-    leadsCount,
-    orderId: actualOrderId,
-    paymentId,
-    amount: amountPaise,
-    currency: "INR",
-    status: "paid",
-    dummy: !isRazorpayEnabled(),
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-  });
 
   user.leadsRemaining = (user.leadsRemaining || 0) + leadsCount;
   await user.save();
@@ -369,8 +492,32 @@ export async function verifyExtraLeadsPayment(req, res) {
       {
         leadsRemaining: user.leadsRemaining,
         paymentId,
+        purpose: "extra-leads",
       },
       `${leadsCount} extra leads added.`
     )
   );
+}
+
+/**
+ * POST /api/plans/confirm { orderId }
+ * Used when Cashfree redirects back. The stored order decides plan vs extra leads.
+ */
+export async function confirmCheckout(req, res) {
+  const { orderId } = req.body || {};
+  if (!orderId) throw new ApiError(400, "orderId is required.");
+
+  const record = await PlanPayment.findOne({
+    orderId,
+    user: req.userDoc._id,
+  });
+  if (!record) throw new ApiError(404, "Payment order was not found.");
+
+  if (record.purpose === "plan") {
+    req.body.planId = record.planId;
+    return verifyPlanPayment(req, res);
+  }
+
+  req.body.count = record.leadsCount;
+  return verifyExtraLeadsPayment(req, res);
 }

@@ -8,12 +8,15 @@ router.use(protect);
 router.get("/", plans.getPlans);
 router.get("/my-subscription", plans.getMySubscription);
 
-/* Plan upgrade — two-step Razorpay flow */
+/* Plan upgrade — Cashfree redirect checkout */
 router.post("/checkout", plans.createPlanOrder);
 router.post("/verify-payment", plans.verifyPlanPayment);
 
-/* Extra leads — two-step Razorpay flow */
+/* Extra leads — Cashfree redirect checkout */
 router.post("/extra-leads/checkout", plans.createExtraLeadsOrder);
 router.post("/extra-leads/verify-payment", plans.verifyExtraLeadsPayment);
+
+/* Return page confirms whichever order this user started. */
+router.post("/confirm", plans.confirmCheckout);
 
 export default router;

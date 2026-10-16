@@ -20,5 +20,6 @@ router.post("/photo", uploadPhoto, profile.uploadMyPhoto);
 router.post("/logo", uploadLogo, profile.uploadMyLogo);
 router.post("/change-password", validate(changePasswordSchema), profile.changePassword);
 router.post("/welcome-seen", profile.markWelcomeSeen);
+router.post("/share", profile.shareMyProfile);
 
 export default router;

@@ -1,7 +1,9 @@
 import Company from "../models/Company.js";
+import JobSeeker from "../models/JobSeeker.js";
 import Interaction from "../models/Interaction.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { assertObjectId } from "../utils/objectId.js";
 
 /* ─── Public fields for a company profile (masked vs unmasked) ─── */
 const PUBLIC_FIELDS =
@@ -39,6 +41,7 @@ function maskContactInfo(companyObj, isUnlocked) {
  */
 export async function getCompanyById(req, res) {
   const companyId = req.params.id;
+  assertObjectId(companyId, "company id");
 
   const company = await Company.findById(companyId).select(PUBLIC_FIELDS);
   if (!company) throw new ApiError(404, "Company not found.");
@@ -66,7 +69,8 @@ export async function getCompanyById(req, res) {
  */
 export async function unlockCompanyContact(req, res) {
   const companyId = req.params.id;
-  const jobSeeker = req.userDoc;
+  assertObjectId(companyId, "company id");
+  const jobSeekerId = req.userDoc._id;
 
   const company = await Company.findById(companyId).select(PUBLIC_FIELDS);
   if (!company) throw new ApiError(404, "Company not found.");
@@ -74,18 +78,19 @@ export async function unlockCompanyContact(req, res) {
   /* Already unlocked? Idempotent, no charge. */
   const already = await Interaction.exists({
     company: companyId,
-    jobSeeker: jobSeeker._id,
+    jobSeeker: jobSeekerId,
     type: "contact",
     direction: "jobseeker_to_company",
   });
 
   if (already) {
+    const fresh = await JobSeeker.findById(jobSeekerId).select("leadsRemaining");
     return res.json(
       new ApiResponse(
         200,
         {
           company: company.toObject(),
-          leadsRemaining: jobSeeker.leadsRemaining,
+          leadsRemaining: fresh?.leadsRemaining ?? 0,
           alreadyUnlocked: true,
         },
         "Already unlocked."
@@ -93,29 +98,55 @@ export async function unlockCompanyContact(req, res) {
     );
   }
 
-  if (jobSeeker.leadsRemaining <= 0) {
+  try {
+    await Interaction.create({
+      company: companyId,
+      jobSeeker: jobSeekerId,
+      type: "contact",
+      direction: "jobseeker_to_company",
+    });
+  } catch (err) {
+    if (err?.code === 11000) {
+      const fresh = await JobSeeker.findById(jobSeekerId).select("leadsRemaining");
+      return res.json(
+        new ApiResponse(
+          200,
+          {
+            company: company.toObject(),
+            leadsRemaining: fresh?.leadsRemaining ?? 0,
+            alreadyUnlocked: true,
+          },
+          "Already unlocked."
+        )
+      );
+    }
+    throw err;
+  }
+
+  const updated = await JobSeeker.findOneAndUpdate(
+    { _id: jobSeekerId, leadsRemaining: { $gt: 0 } },
+    { $inc: { leadsRemaining: -1 } },
+    { new: true }
+  );
+  if (!updated) {
+    await Interaction.deleteOne({
+      company: companyId,
+      jobSeeker: jobSeekerId,
+      type: "contact",
+      direction: "jobseeker_to_company",
+    });
     throw new ApiError(
       402,
       "You have no leads remaining. Please upgrade your plan to unlock more companies."
     );
   }
 
-  await Interaction.create({
-    company: companyId,
-    jobSeeker: jobSeeker._id,
-    type: "contact",
-    direction: "jobseeker_to_company",
-  });
-
-  jobSeeker.leadsRemaining -= 1;
-  await jobSeeker.save();
-
   res.json(
     new ApiResponse(
       200,
       {
         company: company.toObject(),
-        leadsRemaining: jobSeeker.leadsRemaining,
+        leadsRemaining: updated.leadsRemaining,
       },
       "Company contact unlocked."
     )
