@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { protect } from "../middleware/auth.js";
 import * as plans from "../controllers/planController.js";
+import * as invoices from "../controllers/invoiceController.js";
 
 const router = Router();
 router.use(protect);
 
 router.get("/", plans.getPlans);
 router.get("/my-subscription", plans.getMySubscription);
+router.get("/invoice", invoices.latestInvoice);
 
 /* Plan upgrade — Cashfree redirect checkout */
 router.post("/checkout", plans.createPlanOrder);

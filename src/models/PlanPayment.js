@@ -33,6 +33,8 @@ const planPaymentSchema = new mongoose.Schema(
       default: "paid",
     },
     dummy: { type: Boolean, default: false },
+    invoiceNumber: { type: String, default: null },
+    invoiceIssuedAt: { type: Date, default: null },
 
     /* Auto-expire unpaid records after 1 hour */
     expiresAt: { type: Date, required: true },
@@ -40,8 +42,11 @@ const planPaymentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-planPaymentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 planPaymentSchema.index({ paymentId: 1 }, { unique: true });
 planPaymentSchema.index({ userType: 1, user: 1, purpose: 1 });
+planPaymentSchema.index(
+  { expiresAt: 1 },
+  { expireAfterSeconds: 0, partialFilterExpression: { status: "created" } }
+);
 
 export default mongoose.model("PlanPayment", planPaymentSchema);

@@ -19,10 +19,8 @@ import { ApiResponse } from "../utils/ApiResponse.js";
  *   limit  = number (default: 20, max 100)
  */
 
-/* Only these interaction types are valid for the job seeker's inbound feed.
-   "save" and any future types are excluded — the job seeker doesn't need
-   to see companies that merely bookmarked them. */
-const ALLOWED_TYPES = ["view", "shortlist", "contact"];
+/* Inbound actions a job seeker can see. Company name stays hidden until they unlock it. */
+const ALLOWED_TYPES = ["view", "save", "shortlist", "contact"];
 
 export async function jobSeekerActivity(req, res) {
   const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -56,6 +54,7 @@ export async function jobSeekerActivity(req, res) {
     items,
     totalAgg,
     viewCompanies,
+    saveCompanies,
     shortlistCompanies,
     /* Contact-unlocked count = DISTINCT companies where either side did a "contact" */
     contactCompanyIds,
@@ -130,6 +129,7 @@ export async function jobSeekerActivity(req, res) {
     /* Distinct companies who viewed (either direction is fine, but views
        are only logged company→JS so this is naturally company-driven) */
     Interaction.distinct("company", { ...baseMatch, type: "view" }),
+    Interaction.distinct("company", { ...baseMatch, type: "save" }),
     Interaction.distinct("company", { ...baseMatch, type: "shortlist" }),
 
     /* Contact count = DISTINCT companies that appear in either contact direction */
@@ -177,6 +177,7 @@ export async function jobSeekerActivity(req, res) {
 
   const allCompaniesSet = new Set([
     ...viewCompanies.map(String),
+    ...saveCompanies.map(String),
     ...shortlistCompanies.map(String),
     ...contactCompanyIds.map(String),
   ]);
@@ -191,6 +192,7 @@ export async function jobSeekerActivity(req, res) {
       counts: {
         all: allCompaniesSet.size,
         view: viewCompanies.length,
+        save: saveCompanies.length,
         shortlist: shortlistCompanies.length,
         contact: contactCompanyIds.length,
       },

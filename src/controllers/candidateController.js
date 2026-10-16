@@ -54,10 +54,19 @@ async function contactedIdSet(companyId, jobSeekerIds) {
   return new Set(ids.map(String));
 }
 
-function presentCandidate(doc, contactedIds) {
+function presentCandidate(doc, contactedIds, savedIds = null) {
   const obj = doc.toObject ? doc.toObject() : doc;
-  const isContacted = contactedIds.has(String(obj._id));
-  return { ...maskContactInfo(obj, isContacted), isContacted };
+  const id = String(obj._id);
+  const presented = { ...maskContactInfo(obj, contactedIds.has(id)), isContacted: contactedIds.has(id) };
+  if (savedIds) presented.isSaved = savedIds.has(id);
+  return presented;
+}
+
+async function interactionIdSet(companyId, type, jobSeekerIds) {
+  const query = { company: companyId, type };
+  if (jobSeekerIds?.length) query.jobSeeker = { $in: jobSeekerIds };
+  const ids = await Interaction.find(query).distinct("jobSeeker");
+  return new Set(ids.map(String));
 }
 
 async function requireCandidate(id) {
@@ -142,8 +151,12 @@ export async function listCandidates(req, res) {
     JobSeeker.countDocuments(filter),
   ]);
 
-  const contactedIds = await contactedIdSet(req.user.id);
-  const results = candidates.map((c) => presentCandidate(c, contactedIds));
+  const ids = candidates.map((c) => c._id);
+  const [contactedIds, savedIds] = await Promise.all([
+    contactedIdSet(req.user.id, ids),
+    interactionIdSet(req.user.id, "save", ids),
+  ]);
+  const results = candidates.map((c) => presentCandidate(c, contactedIds, savedIds));
 
   res.json(
     new ApiResponse(200, {
@@ -293,11 +306,10 @@ export async function listSavedCandidates(req, res) {
     .populate({ path: "jobSeeker", select: PUBLIC_FIELDS });
 
   const docs = saves.map((s) => s.jobSeeker).filter(Boolean);
-  const contactedIds = await contactedIdSet(
-    req.user.id,
-    docs.map((d) => d._id)
-  );
-  res.json(new ApiResponse(200, { results: docs.map((d) => presentCandidate(d, contactedIds)) }));
+  const docIds = docs.map((d) => d._id);
+  const contactedIds = await contactedIdSet(req.user.id, docIds);
+  const savedIds = new Set(docIds.map(String));
+  res.json(new ApiResponse(200, { results: docs.map((d) => presentCandidate(d, contactedIds, savedIds)) }));
 }
 
 /** GET /api/candidates/shortlisted — company's shortlisted candidates list. */
@@ -387,8 +399,12 @@ export async function searchCandidates(req, res) {
     JobSeeker.countDocuments(filter),
   ]);
 
-  const contactedIds = await contactedIdSet(req.user.id);
-  const results = candidates.map((c) => presentCandidate(c, contactedIds));
+  const ids = candidates.map((c) => c._id);
+  const [contactedIds, savedIds] = await Promise.all([
+    contactedIdSet(req.user.id, ids),
+    interactionIdSet(req.user.id, "save", ids),
+  ]);
+  const results = candidates.map((c) => presentCandidate(c, contactedIds, savedIds));
 
   res.json(
     new ApiResponse(200, {

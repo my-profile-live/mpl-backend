@@ -19,10 +19,13 @@ export async function jobSeekerDashboard(req, res) {
   const jobSeekerId = req.userDoc._id;
 
   /* ─── 1) Distinct-company counts (stat cards) ─── */
-  const [viewCompanies, shortlistCompanies, contactCompanies, recentAgg] =
+  const [viewCompanies, saveCompanies, shortlistCompanies, contactCompanies, recentAgg] =
     await Promise.all([
       /* Distinct companies who viewed */
       Interaction.distinct("company", { jobSeeker: jobSeekerId, type: "view" }),
+
+      /* Distinct companies who saved */
+      Interaction.distinct("company", { jobSeeker: jobSeekerId, type: "save" }),
 
       /* Distinct companies who shortlisted */
       Interaction.distinct("company", {
@@ -41,7 +44,7 @@ export async function jobSeekerDashboard(req, res) {
         {
           $match: {
             jobSeeker: jobSeekerId,
-            type: { $in: ["view", "shortlist", "contact"] },
+            type: { $in: ["view", "save", "shortlist", "contact"] },
           },
         },
 
@@ -108,6 +111,7 @@ export async function jobSeekerDashboard(req, res) {
       plan: computePlanState(req.userDoc),
       stats: {
         profileViews: viewCompanies.length,
+        saves: saveCompanies.length,
         shortlists: shortlistCompanies.length,
         interviewInvites: contactCompanies.length,
       },

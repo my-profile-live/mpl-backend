@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Interaction from "../models/Interaction.js";
+import PlanPayment from "../models/PlanPayment.js";
 
 /**
  * Connects to MongoDB using Mongoose.
@@ -11,6 +12,7 @@ export async function connectDB() {
     const conn = await mongoose.connect(process.env.MONGO_URI);
     console.log(`[db] MongoDB connected -> ${conn.connection.host}/${conn.connection.name}`);
     await ensureActionIndex();
+    await keepPaidInvoices();
   } catch (err) {
     console.error("[db] MongoDB connection failed:", err.message);
     process.exit(1);
@@ -36,5 +38,19 @@ async function ensureActionIndex() {
         { name: "company_1_jobSeeker_1_type_1_direction_1" }
       )
       .catch(() => {});
+  }
+}
+
+/** Unpaid checkouts expire. A paid invoice stays on the account. */
+async function keepPaidInvoices() {
+  try {
+    const indexes = await PlanPayment.collection.indexes();
+    const legacy = indexes.find(
+      (index) => index.name === "expiresAt_1" && !index.partialFilterExpression
+    );
+    if (legacy) await PlanPayment.collection.dropIndex(legacy.name);
+    await PlanPayment.syncIndexes();
+  } catch (err) {
+    console.error("[db] Could not keep paid invoices:", err.message);
   }
 }
