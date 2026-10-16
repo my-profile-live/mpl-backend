@@ -10,6 +10,20 @@
 export const GRACE_DAYS = 7;
 export const REMINDER_DAYS_BEFORE = 3;
 
+export function planIsLive(userDoc) {
+  const status = computePlanState(userDoc).status;
+  return status === "trial" || status === "active";
+}
+
+/** Leftover credits end with the plan. Clears them once the plan is no longer active. */
+export async function dropExpiredCredits(userDoc) {
+  if (!userDoc || planIsLive(userDoc)) return false;
+  if (!userDoc.leadsRemaining) return false;
+  userDoc.leadsRemaining = 0;
+  await userDoc.save();
+  return true;
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**

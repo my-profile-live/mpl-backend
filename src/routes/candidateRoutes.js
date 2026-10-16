@@ -6,15 +6,15 @@ import { Router } from "express";
 const router = Router();
 router.use(protect, requireRole("company"));
 
-/* ─── Read-only browsing — allowed but check plan on unlock actions ─── */
-router.get("/", candidates.listCandidates);              // browsing allowed (see note below)
-router.get("/search", candidates.searchCandidates);      // browsing allowed
-router.get("/saved", candidates.listSavedCandidates);    // own data — allowed
-router.get("/shortlisted", candidates.listShortlistedCandidates); // own data — allowed
+/* ─── Hiring actions need a live plan. Saved history stays readable. ─── */
+router.get("/", requireActivePlan, candidates.listCandidates);
+router.get("/search", requireActivePlan, candidates.searchCandidates);
+router.get("/saved", candidates.listSavedCandidates);
+router.get("/shortlisted", candidates.listShortlistedCandidates);
 router.get("/by-slug/:slug", candidates.getCandidateBySlug);
 router.post("/by-slug/:slug/contact", requireActivePlan, candidates.contactCandidateBySlug);
 router.post("/:id/share-link", candidates.ensureCandidateShareLink);
-router.get("/:id", candidates.getCandidate);             // preview allowed
+router.get("/:id", requireActivePlan, candidates.getCandidate);
 
 /* ─── Mutating actions — blocked when plan hard-expired ─── */
 router.post("/:id/save", requireActivePlan, candidates.toggleSaveCandidate);

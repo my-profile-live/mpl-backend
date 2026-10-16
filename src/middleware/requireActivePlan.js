@@ -25,10 +25,13 @@ export function requireActivePlan(req, res, next) {
 
   const state = computePlanState(user);
 
-  if (state.status === "expired") {
+  if (state.status === "expired" || state.status === "grace") {
+    const audience = user?.role === "company" || req.user?.role === "company"
+      ? "Upgrade your plan to browse and contact candidates again."
+      : "Upgrade your plan to share your profile and contact companies again.";
     throw new ApiError(
       402,
-      "Your plan has expired. Please upgrade to continue using My Profile Live.",
+      `Your plan has expired. ${audience}`,
       { code: "PLAN_EXPIRED", planState: state }
     );
   }

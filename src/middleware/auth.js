@@ -2,6 +2,7 @@ import { verifyToken } from "../utils/jwt.js";
 import { ApiError } from "../utils/ApiError.js";
 import JobSeeker from "../models/JobSeeker.js";
 import Company from "../models/Company.js";
+import { dropExpiredCredits } from "../constants/plans.js";
 
 /**
  * Verifies the Bearer JWT and attaches:
@@ -42,6 +43,7 @@ export async function protect(req, res, next) {
     role: decoded.role,
   };
   req.userDoc = doc;
+  await dropExpiredCredits(doc);
   next();
 }
 

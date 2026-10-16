@@ -4,6 +4,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { fileUrl } from "../middleware/upload.js";
 import { calcCompanyCompletion, calcJobSeekerCompletion } from "../utils/profileCompletion.js";
 import { ensurePublicSlug } from "../utils/publicSlug.js";
+import { planIsLive } from "../constants/plans.js";
 
 function stripSensitive(doc) {
   const obj = doc.toObject ? doc.toObject() : { ...doc };
@@ -77,6 +78,10 @@ export async function uploadMyLogo(req, res) {
 export async function shareMyProfile(req, res) {
   if (req.user.role !== "jobseeker") {
     throw new ApiError(403, "Only job seekers can share a profile link.");
+  }
+
+  if (!planIsLive(req.userDoc)) {
+    throw new ApiError(402, "Your plan has expired. Upgrade your plan to share your profile.");
   }
 
   const slug = await ensurePublicSlug(req.user.id, req.userDoc.fullName);

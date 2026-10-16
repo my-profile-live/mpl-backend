@@ -5,6 +5,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { assertObjectId } from "../utils/objectId.js";
 import { ensurePublicSlug, PUBLIC_SLUG_RE } from "../utils/publicSlug.js";
+import { planIsLive } from "../constants/plans.js";
 
 const PUBLIC_FIELDS =
   "fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
@@ -497,11 +498,13 @@ export async function getPublicProfile(req, res) {
       "publicSlug fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
         "expectedSalary noticePeriod preferredIndustry jobType wfh languagesKnown skills hobbies " +
         "willingToTravel readyToRelocate immediateJoining state district city about gender " +
-        "employmentHistory education isEmailVerified isMobileVerified"
+        "employmentHistory education isEmailVerified isMobileVerified currentPlan planExpiry"
     )
     .lean();
 
-  if (!candidate) throw new ApiError(404, "Profile not found.");
+  if (!candidate || !planIsLive(candidate)) {
+    throw new ApiError(404, "This profile is unavailable. The plan has expired.");
+  }
 
   res.json(new ApiResponse(200, { profile: toPublicProfile(candidate) }));
 }

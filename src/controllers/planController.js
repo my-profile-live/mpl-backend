@@ -3,6 +3,7 @@ import PlanPayment from "../models/PlanPayment.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { getPlansForUser, getPlanById, EXTRA_LEAD_PRICING } from "../data/plans.js";
+import { planIsLive } from "../constants/plans.js";
 import {
   createCashfreeOrder,
   fetchCashfreeOrder,
@@ -299,10 +300,11 @@ export async function verifyPlanPayment(req, res) {
   /* ─── Activate the plan on the user ─── */
   const now = new Date();
   const expiresAt = new Date(now.getTime() + plan.days * 24 * 60 * 60 * 1000);
+  const carryCredits = planIsLive(user);
 
   user.currentPlan = plan.id;
   user.planExpiry = expiresAt;
-  user.leadsRemaining = (user.leadsRemaining || 0) + plan.leads;   // stack
+  user.leadsRemaining = carryCredits ? (user.leadsRemaining || 0) + plan.leads : plan.leads;
   await user.save();
 
   /* ─── Log the Subscription ─── */
@@ -347,6 +349,9 @@ export async function createExtraLeadsOrder(req, res) {
   const pricing = EXTRA_LEAD_PRICING[userType];
 
   if (!pricing) throw new ApiError(400, "Extra leads are not available for this account.");
+  if (!planIsLive(req.userDoc)) {
+    throw new ApiError(402, "Your plan has expired. Upgrade your plan before buying extra credits.");
+  }
   if (!count || count < pricing.minimum) {
     throw new ApiError(400, `Minimum purchase is ${pricing.minimum} leads.`);
   }
@@ -422,6 +427,9 @@ export async function verifyExtraLeadsPayment(req, res) {
   const pricing = EXTRA_LEAD_PRICING[userType];
 
   if (!pricing) throw new ApiError(400, "Extra leads are not available for this account.");
+  if (!planIsLive(user)) {
+    throw new ApiError(402, "Your plan has expired. Upgrade your plan before buying extra credits.");
+  }
 
   const mode = paymentMode();
   if (mode === "unavailable") {

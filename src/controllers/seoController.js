@@ -10,6 +10,8 @@ function siteOrigin() {
 const listed = {
   publicSlug: { $type: "string", $ne: "" },
   status: { $ne: "Inactive" },
+  currentPlan: { $type: "string", $ne: "" },
+  planExpiry: { $gt: new Date() },
 };
 
 function urlEntry(loc, lastmod, priority) {
