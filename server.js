@@ -1,6 +1,5 @@
+import "./src/config/loadEnv.js";
 import dns from "node:dns";
-import dotenv from "dotenv";
-dotenv.config();
 
 // Public DNS is only needed for Atlas SRV lookups. Local MongoDB Community
 // is a direct 127.0.0.1 connection and does not use it.
