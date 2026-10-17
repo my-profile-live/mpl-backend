@@ -790,13 +790,15 @@ export const forgotPassword = asyncHandler(async (req, res) => {
   });
 
   /* Build the clickable link */
-  const frontendUrl =
-    process.env.FRONTEND_URL ||
-    process.env.CLIENT_URL ||
-    "http://localhost:5173";
+  const frontendUrl = String(
+    process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5173"
+  )
+    .split(",")[0]
+    .trim()
+    .replace(/\/$/, "");
 
   const resetUrl =
-    `${frontendUrl.replace(/\/$/, "")}/reset-password` +
+    `${frontendUrl}/reset-password` +
     `?token=${rawToken}` +
     `&uid=${user._id.toString()}` +
     `&type=${userType}`;

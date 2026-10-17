@@ -37,7 +37,8 @@ export function paymentMode() {
 }
 
 export function clientOrigin() {
-  return String(process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "");
+  const raw = process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5173";
+  return String(raw).split(",")[0].trim().replace(/\/$/, "");
 }
 
 /** Cashfree replaces {order_id} when it sends the customer back. */

@@ -3,7 +3,7 @@ import JobSeeker from "../models/JobSeeker.js";
 const PAGE_SIZE = 10000;
 
 function siteOrigin() {
-  const raw = process.env.CLIENT_URL || process.env.FRONTEND_URL || "https://myprofilelive.com";
+  const raw = process.env.FRONTEND_URL || process.env.CLIENT_URL || "https://myprofilelive.com";
   return raw.split(",")[0].trim().replace(/\/$/, "");
 }
 
