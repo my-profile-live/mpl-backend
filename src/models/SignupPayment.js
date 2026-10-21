@@ -10,6 +10,8 @@ const signupPaymentSchema = new mongoose.Schema(
     orderId: { type: String, required: true },
     paymentId: { type: String, required: true },
     amount: { type: Number, required: true },
+    /** 1m is the verification plan. 3m, 6m, and 12m are purchased at signup. */
+    planId: { type: String, default: "1m" },
     status: {
       type: String,
       enum: ["created", "paid", "failed"],

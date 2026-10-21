@@ -17,8 +17,12 @@ const publicProfileLimiter = rateLimit({
 });
 
 /* No auth. Contact details are stripped in the controller. */
+router.get("/llms.txt", seo.llmsTxt);
 router.get("/sitemap.xml", seo.sitemapIndex);
 router.get("/sitemap/:page", seo.sitemapPage);
+router.get("/profile/:slug/share.jpg", seo.profileCardImage);
 router.get("/profile/:slug", publicProfileLimiter, candidates.getPublicProfile);
+router.get(["/social", "/social/"], seo.socialCard);
+router.get("/social/:slug", seo.socialCard);
 
 export default router;

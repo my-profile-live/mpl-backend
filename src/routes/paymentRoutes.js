@@ -1,8 +1,10 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { validate } from "../middleware/validate.js";
+import { protect } from "../middleware/auth.js";
 import {
   createSignupOrder,
+  resumeSignupPayment,
   verifySignupPayment,
 } from "../controllers/paymentController.js";
 import {
@@ -33,5 +35,7 @@ router.post(
   validate(verifySignupPaymentSchema),
   verifySignupPayment
 );
+
+router.post("/signup/resume", protect, resumeSignupPayment);
 
 export default router;

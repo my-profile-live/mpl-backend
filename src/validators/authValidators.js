@@ -139,7 +139,7 @@ export const companySignupSchema = z.object({
     .string()
     .trim()
     .min(1, "Company description is required")
-    .min(10, "Please add at least 10 characters")
+    .min(10, "Description is too short. Add at least 10 characters")
     .max(2000, "Description too long"),
 
   yearOfEstablishment: z
@@ -250,7 +250,7 @@ export const jobSeekerSignupSchema = z
       .string()
       .trim()
       .min(1, "About is required")
-      .min(10, "Please write at least 10 characters")
+      .min(10, "About is too short. Write at least 10 characters")
       .max(1000, "About is too long"),
 
     dob: z

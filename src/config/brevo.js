@@ -6,8 +6,7 @@ import * as brevo from "@getbrevo/brevo";
  * Env is read at send time so dotenv can load after this module is imported.
  */
 
-const LOGO_URL = "https://mpl-frontend-liart.vercel.app/brand-logo.jpg";
-const TAGLINE = "Right Executive, Right Company, Faster Hiring.";
+const LOGO_URL = "https://myprofilelive.com/email-logo.jpg";
 const SUPPORT_EMAIL = "myprofilelive5@gmail.com";
 
 let _apiInstance = null;
@@ -45,7 +44,7 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function emailLayout({ preheader, title, bodyHtml }) {
+export function emailLayout({ preheader, title, bodyHtml }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -63,13 +62,8 @@ function emailLayout({ preheader, title, bodyHtml }) {
             <td style="height:6px;background:#1e3b8c;font-size:0;line-height:0;">&nbsp;</td>
           </tr>
           <tr>
-            <td align="center" style="padding:28px 32px 4px;">
-              <img src="${LOGO_URL}" width="220" alt="My Profile Live" style="display:block;width:220px;max-width:80%;height:auto;border:0;" />
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:0 32px 18px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;color:#64748b;">
-              ${TAGLINE}
+            <td align="center" style="padding:28px 32px 18px;">
+              <img src="${LOGO_URL}" width="240" height="172" alt="My Profile Live" style="display:block;width:240px;max-width:70%;height:auto;border:0;outline:none;text-decoration:none;" />
             </td>
           </tr>
           <tr>
@@ -107,12 +101,13 @@ function codeBlock(code) {
  * Sends a branded HTML email through Brevo.
  * @param {{to: string, subject: string, html: string}} params
  */
-export async function sendEmail({ to, subject, html }) {
+export async function sendEmail({ to, subject, html, attachments }) {
   const email = new brevo.SendSmtpEmail();
   email.sender = getSender();
   email.to = [{ email: to }];
   email.subject = subject;
   email.htmlContent = html;
+  if (attachments?.length) email.attachment = attachments;
 
   try {
     return await getApiInstance().sendTransacEmail(email);
@@ -169,7 +164,8 @@ export async function sendWelcomeEmail(to, name) {
       bodyHtml: `
         <p style="margin:0 0 12px;">Hi ${safeName},</p>
         <p style="margin:0 0 12px;">Your account is ready. A complete profile helps the right company find you faster, and helps a company reach the right executive.</p>
-        <p style="margin:0;font-size:13px;color:#64748b;">Sign in to My Profile Live to finish your profile and choose a plan.</p>
+        <p style="margin:0 0 12px;font-size:13px;color:#64748b;">Sign in to My Profile Live to finish your profile and choose a plan.</p>
+        <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">You have agreed to the <a href="https://myprofilelive.com/privacy-policy" style="color:#64748b;text-decoration:underline;">Privacy Policy</a>.</p>
       `,
     }),
   });

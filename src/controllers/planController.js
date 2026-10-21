@@ -5,14 +5,28 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { getPlansForUser, getPlanById, EXTRA_LEAD_PRICING } from "../data/plans.js";
 import { planIsLive } from "../constants/plans.js";
 import {
+  cashfreeConfig,
+  checkoutReturnUrl,
   createCashfreeOrder,
   fetchCashfreeOrder,
   isPaidOrder,
-  paymentMode,
-  checkoutReturnUrl,
   normalizeIndianPhone,
-  cashfreeConfig,
+  paymentMode,
 } from "../config/cashfree.js";
+import { sendInvoiceForPayment } from "./invoiceController.js";
+
+async function emailPaidInvoice(user, userType, paymentId) {
+  try {
+    const paidRecord = await PlanPayment.findOne({
+      paymentId,
+      user: user._id,
+      status: "paid",
+    });
+    if (paidRecord) await sendInvoiceForPayment(user, userType, paidRecord);
+  } catch (err) {
+    console.error("[invoice-email]", err.message);
+  }
+}
 
 function payerFromUser(user, userType) {
   const phone = normalizeIndianPhone(user.mobileNumber);
@@ -42,17 +56,22 @@ function payerFromUser(user, userType) {
   };
 }
 
-async function openCheckout({ amountPaise, payer, returnPath, note }) {
+async function openCheckout({ amountPaise, customer, note }) {
   try {
-    return await createCashfreeOrder({
+    const data = await createCashfreeOrder({
       amountRupees: amountPaise / 100,
-      customerId: payer.customerId,
-      customerName: payer.name,
-      customerEmail: payer.email,
-      customerPhone: payer.phone,
-      returnUrl: checkoutReturnUrl(returnPath),
+      customerId: customer.customerId,
+      customerName: customer.name,
+      customerEmail: customer.email,
+      customerPhone: customer.phone,
+      returnUrl: checkoutReturnUrl("/payment/return"),
       note,
     });
+    return {
+      id: data.order_id,
+      paymentSessionId: data.payment_session_id,
+      environment: cashfreeConfig().environment,
+    };
   } catch (err) {
     throw new ApiError(err.statusCode || 502, err.message || "Could not start payment.");
   }
@@ -61,9 +80,10 @@ async function openCheckout({ amountPaise, payer, returnPath, note }) {
 function checkoutPayload(order, extra) {
   return {
     dummy: false,
-    orderId: order.order_id,
-    paymentSessionId: order.payment_session_id,
-    environment: cashfreeConfig().environment,
+    provider: "cashfree",
+    orderId: order.id,
+    paymentSessionId: order.paymentSessionId,
+    environment: order.environment,
     currency: "INR",
     ...extra,
   };
@@ -79,7 +99,6 @@ async function claimPaidRecord(record) {
   } catch (err) {
     throw new ApiError(err.statusCode || 502, err.message || "Could not confirm payment.");
   }
-
   if (!isPaidOrder(remote, record.amount)) {
     throw new ApiError(400, "Payment was not completed.");
   }
@@ -123,7 +142,7 @@ export async function getMySubscription(req, res) {
 
 /**
  * POST /api/plans/checkout { planId }
- * Creates a Cashfree order for the given plan.
+ * Creates a Razorpay order for the given plan.
  */
 export async function createPlanOrder(req, res) {
   const { planId } = req.body;
@@ -165,9 +184,8 @@ export async function createPlanOrder(req, res) {
   const payer = payerFromUser(req.userDoc, userType);
   const order = await openCheckout({
     amountPaise,
-    payer,
-    returnPath: "/payment/return",
-    note: `MPL ${plan.label}`,
+    customer: payer,
+    note: plan.label,
   });
 
   await PlanPayment.create({
@@ -176,8 +194,8 @@ export async function createPlanOrder(req, res) {
     userModel: userType === "company" ? "Company" : "JobSeeker",
     purpose: "plan",
     planId: plan.id,
-    orderId: order.order_id,
-    paymentId: order.order_id,
+    orderId: order.id,
+    paymentId: order.id,
     amount: amountPaise,
     currency: "INR",
     status: "created",
@@ -190,6 +208,7 @@ export async function createPlanOrder(req, res) {
       200,
       checkoutPayload(order, {
         amount: amountPaise,
+        description: plan.label,
         planId: plan.id,
         planLabel: plan.label,
       }),
@@ -321,6 +340,8 @@ export async function verifyPlanPayment(req, res) {
     status: "active",
   });
 
+  await emailPaidInvoice(user, userType, paymentId);
+
   res.json(
     new ApiResponse(
       200,
@@ -341,7 +362,7 @@ export async function verifyPlanPayment(req, res) {
 
 /**
  * POST /api/plans/extra-leads/checkout { count }
- * Creates a Cashfree order for an extra-leads top-up.
+ * Creates a Razorpay order for an extra-leads top-up.
  */
 export async function createExtraLeadsOrder(req, res) {
   const count = Number(req.body.count);
@@ -387,9 +408,8 @@ export async function createExtraLeadsOrder(req, res) {
   const payer = payerFromUser(req.userDoc, userType);
   const order = await openCheckout({
     amountPaise,
-    payer,
-    returnPath: "/payment/return",
-    note: `MPL ${count} extra leads`,
+    customer: payer,
+    note: `${count} extra leads`,
   });
 
   await PlanPayment.create({
@@ -398,8 +418,8 @@ export async function createExtraLeadsOrder(req, res) {
     userModel: userType === "company" ? "Company" : "JobSeeker",
     purpose: "extra-leads",
     leadsCount: count,
-    orderId: order.order_id,
-    paymentId: order.order_id,
+    orderId: order.id,
+    paymentId: order.id,
     amount: amountPaise,
     currency: "INR",
     status: "created",
@@ -410,7 +430,11 @@ export async function createExtraLeadsOrder(req, res) {
   res.json(
     new ApiResponse(
       200,
-      checkoutPayload(order, { amount: amountPaise, count }),
+      checkoutPayload(order, {
+        amount: amountPaise,
+        count,
+        description: `${count} extra leads`,
+      }),
       "Order created."
     )
   );
@@ -494,6 +518,8 @@ export async function verifyExtraLeadsPayment(req, res) {
   user.leadsRemaining = (user.leadsRemaining || 0) + leadsCount;
   await user.save();
 
+  await emailPaidInvoice(user, userType, paymentId);
+
   res.json(
     new ApiResponse(
       200,
@@ -509,7 +535,7 @@ export async function verifyExtraLeadsPayment(req, res) {
 
 /**
  * POST /api/plans/confirm { orderId }
- * Used when Cashfree redirects back. The stored order decides plan vs extra leads.
+ * Confirms a Cashfree checkout. The stored order decides plan vs extra leads.
  */
 export async function confirmCheckout(req, res) {
   const { orderId } = req.body || {};

@@ -35,6 +35,7 @@ const planPaymentSchema = new mongoose.Schema(
     dummy: { type: Boolean, default: false },
     invoiceNumber: { type: String, default: null },
     invoiceIssuedAt: { type: Date, default: null },
+    invoiceEmailedAt: { type: Date, default: null },
 
     /* Auto-expire unpaid records after 1 hour */
     expiresAt: { type: Date, required: true },

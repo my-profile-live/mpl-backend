@@ -8,13 +8,14 @@ router.use(protect);
 
 router.get("/", plans.getPlans);
 router.get("/my-subscription", plans.getMySubscription);
+router.get("/invoices", invoices.listInvoices);
 router.get("/invoice", invoices.latestInvoice);
 
-/* Plan upgrade — Cashfree redirect checkout */
+/* Plan upgrade — Razorpay checkout */
 router.post("/checkout", plans.createPlanOrder);
 router.post("/verify-payment", plans.verifyPlanPayment);
 
-/* Extra leads — Cashfree redirect checkout */
+/* Extra leads — Razorpay checkout */
 router.post("/extra-leads/checkout", plans.createExtraLeadsOrder);
 router.post("/extra-leads/verify-payment", plans.verifyExtraLeadsPayment);
 

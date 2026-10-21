@@ -91,34 +91,29 @@ function buildFilter(query) {
   if (query.education) filter["education.qualification"] = query.education;
   if (query.immediateJoiner === "true") filter.immediateJoining = true;
 
-  /* ─── Salary filter ───
-     Company wants candidates whose `expectedSalary` is ≤ maxSalary (LPA).
-     `expectedSalary` is stored as a String (e.g. "9.5"), so we use
-     $expr + $toDouble to compare numerically on the fly.
-     Skip candidates whose salary can't be parsed (empty, "Negotiable", etc.). */
-  if (query.maxSalary != null && query.maxSalary !== "") {
-    const max = Number(query.maxSalary);
-    if (!isNaN(max) && max > 0) {
-      filter.$expr = {
-        $and: [
-          { $ne: ["$expectedSalary", null] },
-          { $ne: ["$expectedSalary", ""] },
-          {
-            $lte: [
-              {
-                $convert: {
-                  input: "$expectedSalary",
-                  to: "double",
-                  onError: null,
-                  onNull: null,
-                },
-              },
-              max,
-            ],
-          },
-        ],
-      };
-    }
+  /* Expected salary is stored as a string (for example "9.5"). Compare it numerically.
+     Candidates with a blank or non-numeric salary are skipped once a bound is set. */
+  const minSalary = Number(query.minSalary);
+  const maxSalary = Number(query.maxSalary);
+  const hasMin = query.minSalary != null && query.minSalary !== "" && Number.isFinite(minSalary);
+  const hasMax = query.maxSalary != null && query.maxSalary !== "" && Number.isFinite(maxSalary) && maxSalary > 0;
+  if (hasMin || hasMax) {
+    const salaryValue = {
+      $convert: {
+        input: "$expectedSalary",
+        to: "double",
+        onError: null,
+        onNull: null,
+      },
+    };
+    const checks = [
+      { $ne: ["$expectedSalary", null] },
+      { $ne: ["$expectedSalary", ""] },
+      { $ne: [salaryValue, null] },
+    ];
+    if (hasMin) checks.push({ $gte: [salaryValue, minSalary] });
+    if (hasMax) checks.push({ $lte: [salaryValue, maxSalary] });
+    filter.$expr = { $and: checks };
   }
 
   /* Skills — array of skills; candidate must have ALL of them */

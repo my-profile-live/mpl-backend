@@ -26,6 +26,7 @@ import Subscription from "../models/Subscription.js";
 import { getPlanById, DEFAULT_FREE_PLAN_ID } from "../data/plans.js";
 import { computePlanState } from "../constants/plans.js";
 import { ensurePublicSlug } from "../utils/publicSlug.js";
+import { sendInvoiceForAccount } from "./invoiceController.js";
 
 /* ───────────────────────── CONSTANTS ───────────────────────── */
 const MODEL = { jobseeker: JobSeeker, company: Company };
@@ -1220,12 +1221,50 @@ export const completeSignupPayment = asyncHandler(async (req, res) => {
     );
   }
 
+  /* A longer plan bought at signup replaces the default 1-month welcome plan. */
+  const purchasedId = payment.planId && payment.planId !== "1m" ? payment.planId : null;
+  if (purchasedId) {
+    const plan = getPlanById(userType, purchasedId);
+    if (plan) {
+      const expiry = new Date(Date.now() + plan.days * 24 * 60 * 60 * 1000);
+      user.currentPlan = plan.id;
+      user.planExpiry = expiry;
+      user.leadsRemaining = plan.leads;
+      try {
+        await Subscription.updateMany(
+          { owner: user._id, ownerType: userType, status: "active" },
+          { $set: { status: "cancelled" } }
+        );
+        await Subscription.create({
+          ownerType: userType,
+          owner: user._id,
+          ownerModel: userType === "company" ? "Company" : "JobSeeker",
+          planId: plan.id,
+          label: plan.label,
+          price: plan.price,
+          leadsGranted: plan.leads,
+          startedAt: new Date(),
+          expiresAt: expiry,
+          status: "active",
+        });
+      } catch (err) {
+        console.error("[signup-plan] subscription log failed:", err.message);
+      }
+    }
+  }
+
   /* ─── Record the payment on the user ─── */
   user.paymentDone = true;
   user.paymentAmount = Math.round((payment.amount || 0) / 100);
   user.paymentAt = new Date();
   user.paymentId = paymentId;
   await user.save();
+
+  try {
+    await sendInvoiceForAccount(user, userType);
+  } catch (err) {
+    console.error("[invoice-email]", err.message);
+  }
 
   return res.json(
     new ApiResponse(

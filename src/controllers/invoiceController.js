@@ -4,6 +4,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { getPlanById } from "../data/plans.js";
 import { sellerProfile } from "../config/seller.js";
+import { sendInvoiceEmail } from "../services/invoiceMail.js";
 
 const STATE_CODES = {
   "jammu and kashmir": "01",
@@ -150,6 +151,7 @@ function presentInvoice(payment, buyer) {
   const tax = splitTax(payment.amount, sameState);
   const line = lineFor(payment);
   return {
+    id: String(payment._id),
     invoiceNumber: payment.invoiceNumber,
     invoiceDate: payment.invoiceIssuedAt || payment.createdAt,
     orderId: payment.orderId,
@@ -192,6 +194,59 @@ export async function latestInvoice(req, res) {
 
   await ensureInvoiceNumber(payment);
   res.json(new ApiResponse(200, { invoice: presentInvoice(payment, buyerFrom(user, req.user.role)) }));
+}
+
+/** GET /api/plans/invoices — every paid invoice on this account. */
+export async function listInvoices(req, res) {
+  const user = req.userDoc;
+  if (!user) throw new ApiError(404, "Account not found.");
+  const role = req.user.role;
+
+  await invoiceFromAccount(user, role);
+  const payments = await PlanPayment.find({
+    user: user._id,
+    userType: role,
+    status: "paid",
+  }).sort({ invoiceIssuedAt: -1, createdAt: -1 });
+
+  for (const payment of payments) {
+    await ensureInvoiceNumber(payment);
+  }
+
+  const buyer = buyerFrom(user, role);
+  res.json(
+    new ApiResponse(200, {
+      invoices: payments.map((payment) => presentInvoice(payment, buyer)),
+    })
+  );
+}
+
+function accountEmail(user) {
+  return String(user.companyEmail || user.email || "").trim();
+}
+
+/** Send the tax invoice once. Payment still stands if email delivery fails. */
+export async function sendInvoiceForPayment(user, role, payment, options = {}) {
+  if (!payment) return { sent: false, reason: "no-payment" };
+  await ensureInvoiceNumber(payment);
+  if (!options.force && payment.invoiceEmailedAt) {
+    return { sent: false, reason: "already-sent", invoiceNumber: payment.invoiceNumber };
+  }
+  const to = accountEmail(user);
+  if (!to) return { sent: false, reason: "no-email" };
+
+  const invoice = presentInvoice(payment, buyerFrom(user, role));
+  await sendInvoiceEmail(to, invoice);
+  payment.invoiceEmailedAt = new Date();
+  await payment.save();
+  return { sent: true, invoiceNumber: invoice.invoiceNumber };
+}
+
+/** Build the account's signup invoice, if one is due, and email it. */
+export async function sendInvoiceForAccount(user, role, options = {}) {
+  const payment = await invoiceFromAccount(user, role);
+  if (!payment) return { sent: false, reason: "no-payment" };
+  return sendInvoiceForPayment(user, role, payment, options);
 }
 
 /**
