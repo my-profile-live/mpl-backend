@@ -1,39 +1,39 @@
 /**
- * MSG91 client wrapper for mobile OTP — Widget API.
+ * MSG91 mobile OTP.
  *
- * Uses the MSG91 OTP Widget flow:
- *   POST /api/v5/widget/sendOtp     → returns { type: "success", reqId }
- *   POST /api/v5/widget/verifyOtp   → body { reqId, otp } → verifies
+ * Live SMS uses the OTP API with the approved template, sender, and DLT id.
+ * The widget API remains only for a verification that was already sent that way.
  *
- * Env vars required:
- *   MSG91_AUTH_KEY   — widget-scoped Auth Token or account-wide Auth Key
- *   MSG91_WIDGET_ID  — the widget id from the MSG91 dashboard
- *
- * IMPORTANT: env vars are read at call time (via getConfig), not at
- * module load time. ESM imports are hoisted, so if dotenv.config() runs
- * in server.js *after* the import chain reaches this file, destructuring
- * process.env at the top would capture undefined values that never
- * refresh — even after dotenv loads .env.
+ * Env vars are read at call time. A value captured at import would stay empty
+ * if dotenv loads after this module is first imported.
  */
 
-const MSG91_BASE = "https://control.msg91.com/api/v5/widget";
+const WIDGET_BASE = "https://control.msg91.com/api/v5/widget";
+const OTP_BASE = "https://control.msg91.com/api/v5/otp";
 
 /**
  * Read env vars lazily at call time.
  * Throws a clear error if not configured.
  */
 function getConfig() {
-  const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY;
-  const MSG91_WIDGET_ID = process.env.MSG91_WIDGET_ID;
+  const authKey = process.env.MSG91_AUTH_KEY;
+  const widgetId = process.env.MSG91_WIDGET_ID || "";
+  const templateId = process.env.MSG91_OTP_TEMPLATE_ID || "";
+  const senderId = process.env.MSG91_SENDER_ID || "";
+  const dltTemplateId = process.env.MSG91_DLT_TEMPLATE_ID || "";
 
-  if (!MSG91_AUTH_KEY) {
+  if (!authKey) {
     throw new Error("MSG91 is not configured (MSG91_AUTH_KEY missing).");
   }
-  if (!MSG91_WIDGET_ID) {
-    throw new Error("MSG91 is not configured (MSG91_WIDGET_ID missing).");
+  if (!templateId && !widgetId) {
+    throw new Error("MSG91 is not configured (template or widget id missing).");
   }
 
-  return { MSG91_AUTH_KEY, MSG91_WIDGET_ID };
+  return { authKey, widgetId, templateId, senderId, dltTemplateId };
+}
+
+function usesSmsTemplate(config) {
+  return Boolean(config.templateId);
 }
 
 /** Strip + and country code → 10-digit local number MSG91 expects. */
@@ -47,30 +47,50 @@ function toLocalIndian(mobile) {
 /* ─────────────────────────── SEND OTP ─────────────────────────── */
 
 export async function sendMobileOtp(mobile) {
-  const { MSG91_AUTH_KEY, MSG91_WIDGET_ID } = getConfig();
-
+  const config = getConfig();
   const local = toLocalIndian(mobile);
+  const fullMobile = `91${local}`;
 
-  const res = await fetch(`${MSG91_BASE}/sendOtp`, {
+  if (usesSmsTemplate(config)) {
+    const params = new URLSearchParams({
+      template_id: config.templateId,
+      mobile: fullMobile,
+      otp_length: "4",
+      otp_expiry: "10",
+      realTimeResponse: "1",
+    });
+    if (config.senderId) params.set("sender", config.senderId);
+    if (config.dltTemplateId) params.set("DLT_TE_ID", config.dltTemplateId);
+
+    const res = await fetch(`${OTP_BASE}?${params}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        authkey: config.authKey,
+      },
+      body: "{}",
+    });
+    const json = await readJson(res);
+    if (!res.ok || json?.type === "error") {
+      console.error("[msg91] sendOtp failed", res.status, json?.type || "");
+      throw new Error(`MSG91 send failed (${res.status})`);
+    }
+    return fullMobile;
+  }
+
+  const res = await fetch(`${WIDGET_BASE}/sendOtp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      authkey: MSG91_AUTH_KEY,
+      authkey: config.authKey,
     },
     body: JSON.stringify({
-      widgetId: MSG91_WIDGET_ID,
-      identifier: `91${local}`,
+      widgetId: config.widgetId,
+      identifier: fullMobile,
     }),
   });
 
-  const rawText = await res.text();
-
-  let json = {};
-  try {
-    json = JSON.parse(rawText);
-  } catch (_) {
-    /* non-JSON response (HTML error page, etc.) */
-  }
+  const json = await readJson(res);
 
   if (!res.ok || json?.type === "error") {
     console.error("[msg91] sendOtp failed", res.status);
@@ -91,19 +111,41 @@ export async function sendMobileOtp(mobile) {
 
 /* ────────────────────────── VERIFY OTP ────────────────────────── */
 
+async function readJson(res) {
+  const rawText = await res.text();
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return {};
+  }
+}
+
 export async function checkMobileOtp(reqId, code) {
-  const { MSG91_AUTH_KEY, MSG91_WIDGET_ID } = getConfig();
+  const config = getConfig();
 
   if (!reqId) return false;
 
-  const res = await fetch(`${MSG91_BASE}/verifyOtp`, {
+  if (/^91\d{10}$/.test(String(reqId))) {
+    const params = new URLSearchParams({
+      mobile: String(reqId),
+      otp: String(code),
+    });
+    const res = await fetch(`${OTP_BASE}/verify?${params}`, {
+      method: "GET",
+      headers: { authkey: config.authKey },
+    });
+    const json = await readJson(res);
+    return res.ok && json?.type === "success";
+  }
+
+  const res = await fetch(`${WIDGET_BASE}/verifyOtp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      authkey: MSG91_AUTH_KEY,
+      authkey: config.authKey,
     },
     body: JSON.stringify({
-      widgetId: MSG91_WIDGET_ID,
+      widgetId: config.widgetId,
       reqId,
       otp: String(code),
     }),
