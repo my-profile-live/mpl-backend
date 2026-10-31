@@ -3,6 +3,8 @@ import { randomBytes, createHash } from "crypto";
 import { safeEqualString } from "../utils/secureCompare.js";
 import JobSeeker from "../models/JobSeeker.js";
 import Company from "../models/Company.js";
+import AdminUser from "../models/AdminUser.js";
+import Affiliate from "../models/Affiliate.js";
 import PendingSignup from "../models/PendingSignup.js";
 import LoginOtp from "../models/LoginOtp.js";
 import PasswordReset from "../models/PasswordReset.js";
@@ -26,6 +28,8 @@ import Subscription from "../models/Subscription.js";
 import { getPlanById, DEFAULT_FREE_PLAN_ID } from "../data/plans.js";
 import { computePlanState } from "../constants/plans.js";
 import { ensurePublicSlug } from "../utils/publicSlug.js";
+import { promoteVerifiedCompany } from "../utils/companyStatus.js";
+import { recordCouponPayment } from "../utils/couponPricing.js";
 import { sendInvoiceForAccount } from "./invoiceController.js";
 
 /* ───────────────────────── CONSTANTS ───────────────────────── */
@@ -71,6 +75,29 @@ function stripSensitive(doc) {
 function getPlanStatus(userDoc) {
   return computePlanState(userDoc).status;
 }
+function staffSession(userType, doc) {
+  const token = signToken({ id: doc._id.toString(), role: userType });
+  const profile = {
+    id: doc._id,
+    name: doc.name || doc.username || "",
+    email: doc.email,
+    username: doc.username || doc.name || "",
+    loginId: doc.loginId || null,
+    shortCode: doc.shortCode || null,
+    linkType: doc.linkType || null,
+    discountPercent: doc.discountPercent || 0,
+    commissionPercent: doc.commissionPercent || 0,
+    paymentDone: true,
+  };
+  return {
+    token,
+    userType,
+    user: { id: doc._id, email: doc.email || doc.loginId || null },
+    profile,
+    plan: null,
+  };
+}
+
 function issueSession(userType, userDoc) {
   const token = signToken({ id: userDoc._id.toString(), role: userType });
 
@@ -227,7 +254,7 @@ export const signupCompany = asyncHandler(async (req, res) => {
     companyEmail: body.companyEmail.toLowerCase(),
     passwordHash,
     companyLogo: req.uploadedFileUrl || null,
-    status: "Pending Verification",
+    status: "Verified",
     paymentDone: false,
     paymentAmount: 0,
     paymentAt: null,
@@ -524,6 +551,7 @@ export const verifySignupOtp = asyncHandler(async (req, res) => {
 
     const userDoc = await Model.create({
       ...payloadWithPlan,
+      ...(pending.userType === "company" ? { status: "Verified" } : {}),
       isMobileVerified: true,
       isEmailVerified: true,
       profileCompletion: completion,
@@ -690,6 +718,7 @@ export const verifyMobileLoginOtp = asyncHandler(async (req, res) => {
     throw new ApiError(404, "No account found with this mobile number.");
 
   user.lastLoginAt = new Date();
+  if (userType === "company") promoteVerifiedCompany(user);
   await user.save();
 
   await LoginOtp.deleteMany({ userType, mobile: e164 });
@@ -719,6 +748,22 @@ export const loginWithEmail = asyncHandler(async (req, res) => {
   }
 
   if (!user) {
+    const admin = await AdminUser.findOne({ email: lower }).select("+passwordHash");
+    if (admin) {
+      const adminMatch = await bcrypt.compare(password, admin.passwordHash);
+      if (!adminMatch) throw new ApiError(401, "Invalid email or password.");
+      return res.json(new ApiResponse(200, staffSession("admin", admin), "Logged in."));
+    }
+
+    const agent = await Affiliate.findOne({
+      $or: [{ loginId: lower }, { email: lower }],
+    }).select("+passwordHash");
+    if (agent) {
+      const agentMatch = await bcrypt.compare(password, agent.passwordHash);
+      if (!agentMatch) throw new ApiError(401, "Invalid email or password.");
+      return res.json(new ApiResponse(200, staffSession("agent", agent), "Logged in."));
+    }
+
     await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
     throw new ApiError(401, "Invalid email or password.");
   }
@@ -727,6 +772,7 @@ export const loginWithEmail = asyncHandler(async (req, res) => {
   if (!match) throw new ApiError(401, "Invalid email or password.");
 
   user.lastLoginAt = new Date();
+  if (userType === "company") promoteVerifiedCompany(user);
   await user.save();
 
   return res.json(
@@ -869,6 +915,7 @@ export const resetPassword = asyncHandler(async (req, res) => {
   if (!user) throw new ApiError(404, "Account not found.");
 
   user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.passwordChangedAt = new Date();
   await user.save();
 
   reset.usedAt = new Date();
@@ -1255,10 +1302,16 @@ export const completeSignupPayment = asyncHandler(async (req, res) => {
 
   /* ─── Record the payment on the user ─── */
   user.paymentDone = true;
+  if (userType === "company") promoteVerifiedCompany(user);
   user.paymentAmount = Math.round((payment.amount || 0) / 100);
   user.paymentAt = new Date();
   user.paymentId = paymentId;
   await user.save();
+  try {
+    await recordCouponPayment({ payment, user, userType });
+  } catch (err) {
+    console.error("[coupon]", err.message);
+  }
 
   try {
     await sendInvoiceForAccount(user, userType);

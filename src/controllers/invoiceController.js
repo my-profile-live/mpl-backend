@@ -5,6 +5,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { getPlanById } from "../data/plans.js";
 import { sellerProfile } from "../config/seller.js";
 import { sendInvoiceEmail } from "../services/invoiceMail.js";
+import { chargePaise } from "../utils/gst.js";
 
 const STATE_CODES = {
   "jammu and kashmir": "01",
@@ -258,10 +259,14 @@ async function invoiceFromAccount(user, role) {
 
   const plan = getPlanById(role, user.currentPlan);
   const paidPlan = plan && plan.price > 0 && plan.id !== "1m";
-  let amountPaise = paidPlan ? plan.price * 100 : Math.round(Number(user.paymentAmount || 0) * 100);
+  const paidPaise = Math.round(Number(user.paymentAmount || 0) * 100);
+  const catalogPaise = paidPlan ? chargePaise(role, plan.price * 100).totalPaise : paidPaise;
+  let amountPaise = paidPaise > 0 ? paidPaise : catalogPaise;
   let paymentId = user.paymentId || `account-${user._id}`;
+  const savedId = String(user.paymentId || "");
+  const cashfreeId = savedId && !savedId.startsWith("pay_") && !savedId.startsWith("local-") && !savedId.startsWith("dummy_");
 
-  if (user.paymentId && !String(user.paymentId).startsWith("pay_")) {
+  if (cashfreeId) {
     try {
       const { fetchCashfreeOrder, isPaidOrder } = await import("../config/cashfree.js");
       const remote = await fetchCashfreeOrder(user.paymentId);

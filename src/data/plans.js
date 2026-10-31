@@ -1,6 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
    PLAN CONFIGURATION
-   - 1 Month (id: "1m") is the FREE plan granted at signup
+   - id "1m" is the welcome plan granted at signup.
+     Company: 30 days. Job seeker: 90 days at the ₹1 verification fee.
    - "recommended" badge sits on the 6-Month plan for both roles
    - `days` is required by the backend for expiry math
    ═══════════════════════════════════════════════════════════════ */
@@ -46,14 +47,24 @@ export const COMPANY_PLANS = [
     leads: 250,
     badge: null,
   },
+  {
+    id: "10k",
+    label: "₹10,000 Plan",
+    duration: "12 months",
+    days: 365,
+    price: 10000,
+    priceLabel: "₹10,000",
+    leads: 300,
+    badge: null,
+  },
 ];
 
 export const CANDIDATE_PLANS = [
   {
     id: "1m",
-    label: "1 Month",
-    duration: "1 month",
-    days: 30,
+    label: "3 Months",
+    duration: "3 months",
+    days: 90,
     price: 99,
     priceLabel: "₹99",
     leads: 10,
@@ -111,5 +122,5 @@ export const getPlanById = (userType, planId) =>
   getPlansForUser(userType).find((p) => p.id === planId);
 
 /* 🎁 The free plan every new user gets on signup.
-   This is the "1 Month" plan — granted at no cost for the first 30 days. */
+   Welcome plan id. Job seekers receive 90 days. Companies receive 30 days. */
 export const DEFAULT_FREE_PLAN_ID = "1m";

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dobError, officeTimingError } from "../utils/profileFields.js";
 
 /* Both update schemas are fully .partial() - PATCH-style updates where the
    client only sends the fields that changed (same UX as ProfileEdit.jsx's
@@ -40,14 +41,34 @@ export const updateJobSeekerSchema = z
     preferredDistrict: z.string(),
     preferredCity: z.string(),
   })
-  .partial();
+  .partial()
+  .superRefine((data, ctx) => {
+    if (data.dob) {
+      const message = dobError(data.dob);
+      if (message) ctx.addIssue({ code: "custom", path: ["dob"], message });
+    }
+  });
 
 export const updateCompanySchema = z
   .object({
     companyName: z.string().min(1),
     companyType: z.string(),
     industry: z.string(),
-    website: z.string(),
+    website: z
+      .string()
+      .trim()
+      .refine(
+        (value) => {
+          if (!value) return true;
+          try {
+            const url = new URL(value);
+            return url.protocol === "http:" || url.protocol === "https:";
+          } catch {
+            return false;
+          }
+        },
+        "Enter a valid URL starting with http:// or https://"
+      ),
     gstNumber: z.string(),
     cinNumber: z.string(),
     contactPersonName: z.string(),
@@ -64,7 +85,19 @@ export const updateCompanySchema = z
     workingDays: z.string(),
     officeTiming: z.string(),
   })
-  .partial();
+  .partial()
+  .superRefine((data, ctx) => {
+    if (data.officeTiming) {
+      const message = officeTimingError(data.officeTiming);
+      if (message) ctx.addIssue({ code: "custom", path: ["officeTiming"], message });
+    }
+    if (data.numberOfEmployees != null && String(data.numberOfEmployees).trim()) {
+      const digits = String(data.numberOfEmployees).replace(/,/g, "");
+      if (!/^[0-9]+$/.test(digits) || Number(digits) <= 0) {
+        ctx.addIssue({ code: "custom", path: ["numberOfEmployees"], message: "Enter a number of employees above 0" });
+      }
+    }
+  });
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),

@@ -5,6 +5,7 @@ import { fileUrl } from "../middleware/upload.js";
 import { calcCompanyCompletion, calcJobSeekerCompletion } from "../utils/profileCompletion.js";
 import { ensurePublicSlug } from "../utils/publicSlug.js";
 import { planIsLive } from "../constants/plans.js";
+import { promoteVerifiedCompany } from "../utils/companyStatus.js";
 
 function stripSensitive(doc) {
   const obj = doc.toObject ? doc.toObject() : { ...doc };
@@ -15,6 +16,9 @@ function stripSensitive(doc) {
 
 /** GET /api/profile/me */
 export async function getMyProfile(req, res) {
+  if (req.user.role === "company" && promoteVerifiedCompany(req.userDoc)) {
+    await req.userDoc.save();
+  }
   res.json(new ApiResponse(200, { userType: req.user.role, profile: stripSensitive(req.userDoc) }));
 }
 
@@ -43,6 +47,7 @@ export async function updateMyProfile(req, res) {
   for (const key of PRIVILEGED_PROFILE_FIELDS) delete req.body[key];
   Object.assign(user, req.body);
 
+  if (req.user.role === "company") promoteVerifiedCompany(user);
   user.profileCompletion =
     req.user.role === "company" ? calcCompanyCompletion(user) : calcJobSeekerCompletion(user);
 
@@ -97,6 +102,7 @@ export async function changePassword(req, res) {
   if (!match) throw new ApiError(401, "Current password is incorrect.");
 
   user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.passwordChangedAt = new Date();
   await user.save();
 
   res.json(new ApiResponse(200, null, "Password changed."));

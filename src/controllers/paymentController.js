@@ -12,6 +12,8 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import SignupPayment from "../models/SignupPayment.js";
 import { getPlanById } from "../data/plans.js";
+import { chargePaise } from "../utils/gst.js";
+import { quoteOffer } from "../utils/couponPricing.js";
 
 /**
  * Signup verification fee, in paise.
@@ -37,16 +39,34 @@ function getSignupFeePaise(userType) {
 /** 1 month uses the verification fee. Longer plans use the catalog price. */
 function signupCharge(userType, planId) {
   const id = planId || "1m";
-  if (!["1m", "3m", "6m", "12m"].includes(id)) {
+  if (!["1m", "3m", "6m", "12m", "10k"].includes(id)) {
     throw new ApiError(400, "Unknown plan.");
   }
   if (id === "1m") {
-    return { planId: id, amountPaise: getSignupFeePaise(userType) };
+    return { planId: id, amountPaise: getSignupFeePaise(userType), gstIncluded: true };
   }
   const plan = getPlanById(userType, id);
   if (!plan?.price) throw new ApiError(400, "Unknown plan.");
-  return { planId: id, amountPaise: plan.price * 100 };
+  const quote = chargePaise(userType, plan.price * 100);
+  return { planId: id, amountPaise: quote.totalPaise, gstIncluded: quote.gstIncluded };
 }
+
+export const quoteSignupCoupon = asyncHandler(async (req, res) => {
+  const charge = signupCharge(req.body.userType, req.body.planId);
+  const quoted = await quoteOffer({
+    code: req.body.couponCode,
+    ref: req.body.ref,
+    declineCoupon: req.body.declineCoupon,
+    userType: req.body.userType,
+    totalPaise: charge.amountPaise,
+  });
+  return res.json(new ApiResponse(200, {
+    code: quoted.coupon ? quoted.code : null,
+    discountPercent: quoted.coupon?.discountPercent || 0,
+    listAmount: charge.amountPaise,
+    amount: quoted.totalPaise,
+  }, "Coupon quoted."));
+});
 
 /* ─────────────────────── CREATE ORDER ─────────────────────── */
 
@@ -58,7 +78,14 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
   }
 
   const charge = signupCharge(userType, planId);
-  const amountPaise = charge.amountPaise;
+  const quoted = await quoteOffer({
+    code: req.body.couponCode,
+    ref: req.body.ref,
+    declineCoupon: req.body.declineCoupon,
+    userType,
+    totalPaise: charge.amountPaise,
+  });
+  const amountPaise = quoted.totalPaise;
   const mode = paymentMode();
   if (mode === "unavailable") {
     throw new ApiError(503, "Payments are temporarily unavailable.");
@@ -119,6 +146,9 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
     dummy: false,
     customerEmail: email,
     customerPhone: phone,
+    couponCode: quoted.coupon ? quoted.code : null,
+    refCode: req.body.ref || null,
+    listAmount: quoted.listPaise || charge.amountPaise,
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   });
 

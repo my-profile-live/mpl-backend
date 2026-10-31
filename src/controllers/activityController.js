@@ -1,5 +1,7 @@
 import Interaction from "../models/Interaction.js";
+import JobSeeker from "../models/JobSeeker.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { paidCandidateQuery } from "../utils/candidateVisibility.js";
 
 /**
  * GET /api/activity?filter=view|shortlist|contact
@@ -234,6 +236,8 @@ export async function companyActivity(req, res) {
     /* "all" → only the meaningful actions, never views */
     filter.type = { $in: ["save", "shortlist", "contact"] };
   }
+
+  filter.jobSeeker = { $in: await JobSeeker.find(paidCandidateQuery()).distinct("_id") };
 
   const [items, total] = await Promise.all([
     Interaction.find(filter)

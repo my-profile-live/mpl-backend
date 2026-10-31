@@ -2,6 +2,8 @@ import { verifyToken } from "../utils/jwt.js";
 import { ApiError } from "../utils/ApiError.js";
 import JobSeeker from "../models/JobSeeker.js";
 import Company from "../models/Company.js";
+import AdminUser from "../models/AdminUser.js";
+import Affiliate from "../models/Affiliate.js";
 import { dropExpiredCredits } from "../constants/plans.js";
 
 /**
@@ -27,13 +29,16 @@ export async function protect(req, res, next) {
     throw new ApiError(401, "Invalid or expired token.");
   }
 
-  if (decoded.role !== "company" && decoded.role !== "jobseeker") {
-    throw new ApiError(401, "Invalid or expired token.");
-  }
+  const models = { company: Company, jobseeker: JobSeeker, admin: AdminUser, agent: Affiliate };
+  const Model = models[decoded.role];
+  if (!Model) throw new ApiError(401, "Invalid or expired token.");
 
-  const Model = decoded.role === "company" ? Company : JobSeeker;
   const doc = await Model.findById(decoded.id);
   if (!doc) throw new ApiError(401, "Account no longer exists.");
+
+  if (doc.passwordChangedAt && decoded.iat < Math.floor(new Date(doc.passwordChangedAt).getTime() / 1000)) {
+    throw new ApiError(401, "Your session ended. Please sign in again.");
+  }
 
   /* 🐛 FIX: expose `_id` (for findById) AND `id` (for backwards-compat).
      Also attach `userDoc` — the full Mongoose document. */

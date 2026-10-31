@@ -14,6 +14,8 @@ import {
   paymentMode,
 } from "../config/cashfree.js";
 import { sendInvoiceForPayment } from "./invoiceController.js";
+import { chargePaise } from "../utils/gst.js";
+import { quoteOffer, recordCouponPayment } from "../utils/couponPricing.js";
 
 async function emailPaidInvoice(user, userType, paymentId) {
   try {
@@ -154,7 +156,15 @@ export async function createPlanOrder(req, res) {
     throw new ApiError(400, "This plan is not purchasable.");
   }
 
-  const amountPaise = plan.price * 100;
+  const quoted = await quoteOffer({
+    code: req.body.couponCode,
+    ref: req.body.ref,
+    declineCoupon: req.body.declineCoupon,
+    userType,
+    userId: req.userDoc._id,
+    totalPaise: chargePaise(userType, plan.price * 100).totalPaise,
+  });
+  const amountPaise = quoted.totalPaise;
   const mode = paymentMode();
   if (mode === "unavailable") {
     throw new ApiError(503, "Payments are temporarily unavailable.");
@@ -200,6 +210,9 @@ export async function createPlanOrder(req, res) {
     currency: "INR",
     status: "created",
     dummy: false,
+    couponCode: quoted.coupon ? quoted.code : null,
+    refCode: req.body.ref || null,
+    listAmount: quoted.listPaise || amountPaise,
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   });
 
@@ -243,7 +256,7 @@ export async function verifyPlanPayment(req, res) {
   if (mode === "dummy") {
     plan = getPlanById(userType, planId);
     if (!plan) throw new ApiError(400, "Unknown plan.");
-    amountPaise = plan.price * 100;
+    amountPaise = chargePaise(userType, plan.price * 100).totalPaise;
     actualOrderId = orderId || `dummy_plan_${Date.now()}`;
     paymentId = `dummy_pay_${Date.now()}`;
   } else {
@@ -341,6 +354,12 @@ export async function verifyPlanPayment(req, res) {
   });
 
   await emailPaidInvoice(user, userType, paymentId);
+  try {
+    const paidRecord = await PlanPayment.findOne({ paymentId, user: user._id });
+    if (paidRecord) await recordCouponPayment({ payment: paidRecord, user, userType });
+  } catch (err) {
+    console.error("[coupon]", err.message);
+  }
 
   res.json(
     new ApiResponse(
@@ -380,7 +399,7 @@ export async function createExtraLeadsOrder(req, res) {
     throw new ApiError(400, "Maximum purchase is 500 leads per order.");
   }
 
-  const amountPaise = count * pricing.perLead * 100;
+  const amountPaise = chargePaise(userType, count * pricing.perLead * 100).totalPaise;
   const mode = paymentMode();
   if (mode === "unavailable") {
     throw new ApiError(503, "Payments are temporarily unavailable.");
@@ -469,7 +488,7 @@ export async function verifyExtraLeadsPayment(req, res) {
     if (!leadsCount || leadsCount < pricing.minimum) {
       throw new ApiError(400, `Minimum purchase is ${pricing.minimum} leads.`);
     }
-    const amountPaise = leadsCount * pricing.perLead * 100;
+    const amountPaise = chargePaise(userType, leadsCount * pricing.perLead * 100).totalPaise;
     const actualOrderId = orderId || `dummy_leads_${Date.now()}`;
     paymentId = `dummy_pay_${Date.now()}`;
 

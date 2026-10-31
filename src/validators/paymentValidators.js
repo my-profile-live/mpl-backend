@@ -5,7 +5,10 @@ const userTypeEnum = z.enum(["company", "jobseeker"]);
 /* NOTE: validate.js parses req.body directly (no { body } wrapper). */
 export const createSignupOrderSchema = z.object({
   userType: userTypeEnum,
-  planId: z.enum(["1m", "3m", "6m", "12m"]).optional(),
+  planId: z.enum(["1m", "3m", "6m", "12m", "10k"]).optional(),
+  couponCode: z.string().trim().max(40).optional(),
+  ref: z.string().trim().max(40).optional(),
+  declineCoupon: z.boolean().optional(),
   customerName: z.string().trim().min(1).max(100).optional(),
   customerEmail: z.string().trim().email().max(200).optional(),
   customerPhone: z.string().trim().min(10).max(20).optional(),

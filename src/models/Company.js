@@ -15,6 +15,7 @@ const companySchema = new mongoose.Schema(
     cinNumber: { type: String, uppercase: true },
     website: String,
     passwordHash: { type: String, required: true, select: false },
+    passwordChangedAt: { type: Date, default: null },
 
     // ── Contact & Location ────────────────────────────
     companyEmail: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },

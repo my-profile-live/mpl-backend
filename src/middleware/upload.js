@@ -104,7 +104,17 @@ export const uploadPhoto = guardUpload(
   800
 );
 
-/** Public URL for an image stored in MongoDB. */
+const IMAGE_HOSTS = new Set([
+  "localhost:5000",
+  "127.0.0.1:5000",
+  "myprofilelive.com",
+  "www.myprofilelive.com",
+]);
+
+/** Public URL for an image stored in MongoDB. The browser Host header is ignored unless it is one of our own hosts. */
 export function fileUrl(req, filename) {
-  return `${req.protocol}://${req.get("host")}/uploads/${filename}`;
+  const host = String(req.get("host") || "").toLowerCase();
+  const safeHost = IMAGE_HOSTS.has(host) ? host : "myprofilelive.com";
+  const protocol = safeHost.endsWith(":5000") ? "http" : "https";
+  return `${protocol}://${safeHost}/uploads/${filename}`;
 }

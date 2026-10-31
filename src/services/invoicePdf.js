@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
@@ -150,7 +151,7 @@ function invoiceDocument(invoice, logo) {
         <thead>
           <tr>
             <th>Description</th>
-            <th>SAC</th>
+            <th>HSN</th>
             <th class="right">Taxable value</th>
           </tr>
         </thead>
@@ -178,7 +179,16 @@ function invoiceDocument(invoice, logo) {
 }
 
 function chromePath() {
-  return process.env.MPL_CHROME_PATH || "/usr/bin/google-chrome-stable";
+  if (process.env.MPL_CHROME_PATH) return process.env.MPL_CHROME_PATH;
+  const windows = [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  ];
+  return windows.find((file) => existsSync(file)) || "/usr/bin/google-chrome-stable";
+}
+
+export function buildInvoiceDocument(invoice, logo) {
+  return invoiceDocument(invoice, logo);
 }
 
 /** Render the same invoice sheet used for Download Invoice. */

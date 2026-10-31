@@ -25,6 +25,9 @@ const planPaymentSchema = new mongoose.Schema(
     orderId: { type: String, required: true },
     paymentId: { type: String, required: true },
     amount: { type: Number, required: true },   // in paise
+    couponCode: { type: String, default: null },
+    refCode: { type: String, default: null },
+    listAmount: { type: Number, default: null },
     currency: { type: String, default: "INR" },
 
     status: {

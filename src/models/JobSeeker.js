@@ -37,6 +37,7 @@ const jobSeekerSchema = new mongoose.Schema(
     mobileNumber: { type: String, required: true, unique: true, index: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
     passwordHash: { type: String, required: true, select: false },
+    passwordChangedAt: { type: Date, default: null },
     dob: String,
     gender: { type: String, enum: ["Male", "Female", "Other"] },
     about: { type: String, maxlength: 1000 },

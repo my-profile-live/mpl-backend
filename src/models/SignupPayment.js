@@ -21,6 +21,9 @@ const signupPaymentSchema = new mongoose.Schema(
     /** Payer details captured when the Cashfree order was created. */
     customerEmail: { type: String, default: null },
     customerPhone: { type: String, default: null },
+    couponCode: { type: String, default: null },
+    refCode: { type: String, default: null },
+    listAmount: { type: Number, default: null },
     /** Set once a user account consumes this payment, so it cannot be reused. */
     consumedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
 

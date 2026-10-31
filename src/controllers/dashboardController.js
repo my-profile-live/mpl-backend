@@ -1,6 +1,8 @@
 import { computePlanState } from "../constants/plans.js";
 import Interaction from "../models/Interaction.js";
+import JobSeeker from "../models/JobSeeker.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { paidCandidateQuery } from "../utils/candidateVisibility.js";
 
 /**
  * GET /api/dashboard/jobseeker
@@ -130,6 +132,9 @@ export async function jobSeekerDashboard(req, res) {
  */
 export async function companyDashboard(req, res) {
   const company = req.user.id;
+  const paidIds = await JobSeeker.find(paidCandidateQuery()).distinct("_id");
+  const paid = new Set(paidIds.map((id) => String(id)));
+  const onlyPaid = (ids) => ids.filter((id) => paid.has(String(id)));
 
   const [savedIds, shortlistedIds, contactedIds, recentAgg] = await Promise.all([
     Interaction.distinct("jobSeeker", { company, type: "save" }),
@@ -152,7 +157,6 @@ export async function companyDashboard(req, res) {
       },
       { $replaceRoot: { newRoot: "$latest" } },
       { $sort: { createdAt: -1 } },
-      { $limit: 5 },
       {
         $lookup: {
           from: "jobseekers",
@@ -162,6 +166,16 @@ export async function companyDashboard(req, res) {
         },
       },
       { $unwind: "$jobSeekerDoc" },
+      {
+        $match: {
+          "jobSeekerDoc.paymentDone": true,
+          "jobSeekerDoc.paymentAmount": { $gte: 1 },
+          "jobSeekerDoc.status": { $ne: "Inactive" },
+          "jobSeekerDoc.currentPlan": { $type: "string", $ne: "" },
+          "jobSeekerDoc.planExpiry": { $gt: new Date() },
+        },
+      },
+      { $limit: 5 },
       {
         $project: {
           _id: 0,
@@ -184,9 +198,9 @@ export async function companyDashboard(req, res) {
       leadsRemaining: req.userDoc.leadsRemaining,
       plan: computePlanState(req.userDoc),   // ⬅️ new
       stats: {
-        saved: savedIds.length,
-        shortlisted: shortlistedIds.length,
-        contacted: contactedIds.length,
+        saved: onlyPaid(savedIds).length,
+        shortlisted: onlyPaid(shortlistedIds).length,
+        contacted: onlyPaid(contactedIds).length,
         activeJobs: 0,
       },
       recentActivity: recentAgg,

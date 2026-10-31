@@ -4,6 +4,7 @@ import { validate } from "../middleware/validate.js";
 import { protect } from "../middleware/auth.js";
 import {
   createSignupOrder,
+  quoteSignupCoupon,
   resumeSignupPayment,
   verifySignupPayment,
 } from "../controllers/paymentController.js";
@@ -21,6 +22,13 @@ const paymentLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+router.post(
+  "/signup/quote",
+  paymentLimiter,
+  validate(createSignupOrderSchema),
+  quoteSignupCoupon
+);
 
 router.post(
   "/signup/create-order",

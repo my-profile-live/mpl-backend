@@ -8,6 +8,8 @@ import planRoutes from "./planRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
 import companyRoutes from "./companyRoutes.js";
 import publicRoues from "./publicRoutes.js";
+import adminRoutes from "./adminRoutes.js";
+import agentRoutes from "./agentRoutes.js";
 
 const router = Router();
 
@@ -22,5 +24,7 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/plans", planRoutes);
 router.use("/", activityRoutes); // exposes /activity and /company/activity directly
 router.use("/public", publicRoues);
+router.use("/admin", adminRoutes);
+router.use("/agent", agentRoutes);
 
 export default router;

@@ -9,6 +9,14 @@ import {
   EXPERIENCE_RANGES,
   GENDERS,
 } from "../constants/options.js";
+import {
+  dobError,
+  employmentDateError,
+  gstError,
+  officeTimingError,
+  passingYearError,
+  scoreError,
+} from "../utils/profileFields.js";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const QUALIFICATIONS_WITHOUT_COLLEGE = ["10th", "12th"];
@@ -100,7 +108,7 @@ export const companySignupSchema = z.object({
       (v) =>
         !v ||
         /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i.test(v),
-      "Invalid GST format (e.g. 22AAAAA0000A1Z5)"
+      "Invalid GST format (e.g. 24ABCDE1234F1Z5)"
     ),
 
   cinNumber: z
@@ -154,11 +162,14 @@ export const companySignupSchema = z.object({
       "Year cannot be in the future"
     ),
 
-  numberOfEmployees: z
-    .string()
-    .min(1, "Number of employees is required")
-    .regex(/^[0-9]+$/, "Enter a valid number")
-    .refine((v) => Number(v) > 0, "Must be greater than 0"),
+  numberOfEmployees: z.preprocess(
+    (v) => (typeof v === "string" ? v.replace(/,/g, "") : v),
+    z
+      .string()
+      .min(1, "Number of employees is required")
+      .regex(/^[0-9]+$/, "Enter a valid number")
+      .refine((v) => Number(v) > 0, "Must be greater than 0")
+  ),
 
   productsServices: z
     .string()
@@ -174,10 +185,7 @@ export const companySignupSchema = z.object({
     .string()
     .trim()
     .min(1, "Office timing is required")
-    .refine((v) => {
-      const parts = v.split(" - ");
-      return parts[0] && parts[1];
-    }, "Both start and end time are required"),
+    .refine((v) => !officeTimingError(v), (v) => ({ message: officeTimingError(v) })),
 
   profileCompletion: z
     .union([z.string(), z.number()])
@@ -185,6 +193,9 @@ export const companySignupSchema = z.object({
     .transform((v) => (v === undefined ? 0 : Number(v))),
 
   status: z.string().trim().max(50).optional().or(z.literal("")),
+}).superRefine((data, ctx) => {
+  const message = gstError({ gst: data.gstNumber, pan: data.panNumber, state: data.state });
+  if (message) ctx.addIssue({ code: "custom", path: ["gstNumber"], message });
 });
 
 /* ── Job seeker signup ── */
@@ -202,7 +213,7 @@ const educationEntry = z
     district: z.string().trim().min(1, "District is required"),
     passingYear: z
       .string()
-      .regex(/^(19|20)\d{2}$/, "Enter a valid 4-digit year")
+      .regex(/^(19|20)\d{2}$/, "Enter a year like 2018")
       .refine(
         (v) => Number(v) <= CURRENT_YEAR,
         "Passing year cannot be in the future"
@@ -210,7 +221,8 @@ const educationEntry = z
     percentage: z
       .string()
       .trim()
-      .min(1, "Percentage / CGPA is required"),
+      .min(1, "Percentage / CGPA is required")
+      .refine((v) => !scoreError(v), (v) => ({ message: scoreError(v) })),
   })
   .refine(
     (ed) => {
@@ -260,7 +272,7 @@ export const jobSeekerSignupSchema = z
     dob: z
       .string()
       .min(1, "Date of birth is required")
-      .refine((v) => new Date(v) <= new Date(), "Date of birth cannot be in the future"),
+      .refine((v) => !dobError(v), (v) => ({ message: dobError(v) })),
 
     pinCode,
     address: z.string().trim().min(1, "Address is required"),
@@ -320,7 +332,21 @@ export const jobSeekerSignupSchema = z
       message: "Please select at least one job preference",
       path: ["_jobPreference"],
     }
-  );
+  )
+  .superRefine((data, ctx) => {
+    (data.education || []).forEach((ed, index) => {
+      const message = passingYearError(ed.passingYear, data.dob);
+      if (message && message !== "Passing year is required" && message !== "Enter a year like 2018" && message !== "Passing year cannot be in the future") {
+        ctx.addIssue({ code: "custom", path: ["education", index, "passingYear"], message });
+      }
+    });
+    (data.employmentHistory || []).forEach((job, index) => {
+      const dates = employmentDateError({ ...job, dob: data.dob });
+      Object.entries(dates).forEach(([key, message]) => {
+        ctx.addIssue({ code: "custom", path: ["employmentHistory", index, key], message });
+      });
+    });
+  });
 
 /* ── Login / OTP ── */
 export const requestMobileOtpSchema = z.object({
@@ -348,7 +374,15 @@ export const resendOtpSchema = z.object({
 });
 
 export const emailLoginSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
+  email: z
+    .string()
+    .trim()
+    .min(1, "Email is required")
+    .refine(
+      (value) =>
+        z.string().email().safeParse(value).success || /^[a-zA-Z0-9._-]{3,40}$/.test(value),
+      "Enter a valid email address"
+    ),
   password: z.string().min(1, "Password is required"),
 });
 

@@ -44,7 +44,7 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-export function emailLayout({ preheader, title, bodyHtml }) {
+export function emailLayout({ preheader, title, bodyHtml, footerNote }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -80,7 +80,7 @@ export function emailLayout({ preheader, title, bodyHtml }) {
             <td style="padding:16px 32px 22px;background:#f8fafc;border-top:1px solid #e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#64748b;">
               <strong style="color:#1e3b8c;">My Profile Live</strong><br />
               <a href="mailto:${SUPPORT_EMAIL}" style="color:#1e3b8c;text-decoration:none;">${SUPPORT_EMAIL}</a><br />
-              This is a service message. Please do not reply to this email.
+              ${footerNote || "This is a service message. Please do not reply to this email."}
             </td>
           </tr>
         </table>
@@ -101,12 +101,13 @@ function codeBlock(code) {
  * Sends a branded HTML email through Brevo.
  * @param {{to: string, subject: string, html: string}} params
  */
-export async function sendEmail({ to, subject, html, attachments }) {
+export async function sendEmail({ to, subject, html, attachments, replyTo }) {
   const email = new brevo.SendSmtpEmail();
   email.sender = getSender();
   email.to = [{ email: to }];
   email.subject = subject;
   email.htmlContent = html;
+  if (replyTo) email.replyTo = { email: replyTo.email, name: replyTo.name || undefined };
   if (attachments?.length) email.attachment = attachments;
 
   try {

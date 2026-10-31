@@ -6,6 +6,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { assertObjectId } from "../utils/objectId.js";
 import { ensurePublicSlug, PUBLIC_SLUG_RE } from "../utils/publicSlug.js";
 import { planIsLive } from "../constants/plans.js";
+import { paidCandidateQuery } from "../utils/candidateVisibility.js";
 
 const PUBLIC_FIELDS =
   "fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
@@ -72,14 +73,14 @@ async function interactionIdSet(companyId, type, jobSeekerIds) {
 
 async function requireCandidate(id) {
   assertObjectId(id, "candidate id");
-  const candidate = await JobSeeker.findById(id).select(PUBLIC_FIELDS);
+  const candidate = await JobSeeker.findOne({ _id: id, ...paidCandidateQuery() }).select(PUBLIC_FIELDS);
   if (!candidate) throw new ApiError(404, "Candidate not found.");
   return candidate;
 }
 
 /** Builds a Mongo filter object from FilterSidebar.jsx's query params. */
 function buildFilter(query) {
-  const filter = {};
+  const filter = paidCandidateQuery();
 
   /* Text fields */
   if (query.industry) filter.preferredIndustry = query.industry;
@@ -91,19 +92,62 @@ function buildFilter(query) {
   if (query.education) filter["education.qualification"] = query.education;
   if (query.immediateJoiner === "true") filter.immediateJoining = true;
 
-  /* Expected salary is stored as a string (for example "9.5"). Compare it numerically.
-     Candidates with a blank or non-numeric salary are skipped once a bound is set. */
+  /* Expected salary is compared as monthly rupees.
+     Below 1,000 is an older LPA figure. 1,00,000 or more is an older yearly amount. */
   const minSalary = Number(query.minSalary);
   const maxSalary = Number(query.maxSalary);
   const hasMin = query.minSalary != null && query.minSalary !== "" && Number.isFinite(minSalary);
   const hasMax = query.maxSalary != null && query.maxSalary !== "" && Number.isFinite(maxSalary) && maxSalary > 0;
   if (hasMin || hasMax) {
     const salaryValue = {
-      $convert: {
-        input: "$expectedSalary",
-        to: "double",
-        onError: null,
-        onNull: null,
+      $let: {
+        vars: {
+          raw: {
+            $convert: {
+              input: {
+                $replaceAll: {
+                  input: {
+                    $replaceAll: {
+                      input: {
+                        $replaceAll: {
+                          input: { $ifNull: ["$expectedSalary", ""] },
+                          find: ",",
+                          replacement: "",
+                        },
+                      },
+                      find: "LPA",
+                      replacement: "",
+                    },
+                  },
+                  find: "lpa",
+                  replacement: "",
+                },
+              },
+              to: "double",
+              onError: null,
+              onNull: null,
+            },
+          },
+        },
+        in: {
+          $cond: [
+            { $eq: ["$$raw", null] },
+            null,
+            {
+              $cond: [
+                { $lt: ["$$raw", 1000] },
+                { $divide: [{ $multiply: ["$$raw", 100000] }, 12] },
+                {
+                  $cond: [
+                    { $gte: ["$$raw", 100000] },
+                    { $divide: ["$$raw", 12] },
+                    "$$raw",
+                  ],
+                },
+              ],
+            },
+          ],
+        },
       },
     };
     const checks = [
@@ -299,7 +343,7 @@ export async function contactCandidate(req, res) {
 export async function listSavedCandidates(req, res) {
   const saves = await Interaction.find({ company: req.user.id, type: "save" })
     .sort({ createdAt: -1 })
-    .populate({ path: "jobSeeker", select: PUBLIC_FIELDS });
+    .populate({ path: "jobSeeker", match: paidCandidateQuery(), select: PUBLIC_FIELDS });
 
   const docs = saves.map((s) => s.jobSeeker).filter(Boolean);
   const docIds = docs.map((d) => d._id);
@@ -312,7 +356,7 @@ export async function listSavedCandidates(req, res) {
 export async function listShortlistedCandidates(req, res) {
   const items = await Interaction.find({ company: req.user.id, type: "shortlist" })
     .sort({ createdAt: -1 })
-    .populate({ path: "jobSeeker", select: PUBLIC_FIELDS });
+    .populate({ path: "jobSeeker", match: paidCandidateQuery(), select: PUBLIC_FIELDS });
 
   const docs = items.map((i) => i.jobSeeker).filter(Boolean);
   const contactedIds = await contactedIdSet(
@@ -384,7 +428,7 @@ export async function searchCandidates(req, res) {
     );
   }
 
-  const filter = { $or: orConditions };
+  const filter = { $and: [paidCandidateQuery(), { $or: orConditions }] };
 
   const [candidates, total] = await Promise.all([
     JobSeeker.find(filter)
@@ -487,7 +531,7 @@ export async function getPublicProfile(req, res) {
 
   const candidate = await JobSeeker.findOne({
     publicSlug: slug,
-    status: { $ne: "Inactive" },
+    ...paidCandidateQuery(),
   })
     .select(
       "publicSlug fullName photo currentJobTitle currentCompany totalExperience relevantExperience " +
@@ -509,7 +553,7 @@ export async function getCandidateBySlug(req, res) {
   const slug = readSlug(req.params.slug);
   if (!slug) throw new ApiError(404, "Profile not found.");
 
-  const candidate = await JobSeeker.findOne({ publicSlug: slug }).select(PUBLIC_FIELDS);
+  const candidate = await JobSeeker.findOne({ publicSlug: slug, ...paidCandidateQuery() }).select(PUBLIC_FIELDS);
   if (!candidate) throw new ApiError(404, "Candidate not found.");
 
   const contactedIds = await contactedIdSet(req.user.id, [candidate._id]);
@@ -521,7 +565,7 @@ export async function contactCandidateBySlug(req, res) {
   const slug = readSlug(req.params.slug);
   if (!slug) throw new ApiError(404, "Profile not found.");
 
-  const candidate = await JobSeeker.findOne({ publicSlug: slug }).select("_id");
+  const candidate = await JobSeeker.findOne({ publicSlug: slug, ...paidCandidateQuery() }).select("_id");
   if (!candidate) throw new ApiError(404, "Candidate not found.");
 
   req.params.id = String(candidate._id);

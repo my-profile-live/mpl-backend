@@ -15,7 +15,7 @@ export function sellerProfile() {
     address: process.env.MPL_ADDRESS || SUPPLIER_ADDRESS,
     email: "myprofilelive5@gmail.com",
     phone: "+91 7600688820",
-    sac: "998431",
+    sac: "997158",
     sacLabel: "Online information and database access",
     gstRate: 18,
   };

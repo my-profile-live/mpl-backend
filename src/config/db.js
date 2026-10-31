@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Interaction from "../models/Interaction.js";
 import PlanPayment from "../models/PlanPayment.js";
+import CouponUse from "../models/CouponUse.js";
 
 /**
  * Connects to MongoDB using Mongoose.
@@ -13,6 +14,7 @@ export async function connectDB() {
     console.log(`[db] MongoDB connected -> ${conn.connection.host}/${conn.connection.name}`);
     await ensureActionIndex();
     await keepPaidInvoices();
+    await allowRepeatCouponUses();
   } catch (err) {
     console.error("[db] MongoDB connection failed:", err.message);
     process.exit(1);
@@ -38,6 +40,20 @@ async function ensureActionIndex() {
         { name: "company_1_jobSeeker_1_type_1_direction_1" }
       )
       .catch(() => {});
+  }
+}
+
+/** A one-time coupon still blocks a second use in code. Repeat coupons need more than one row. */
+async function allowRepeatCouponUses() {
+  try {
+    const indexes = await CouponUse.collection.indexes();
+    const unique = indexes.find(
+      (index) => index.name === "coupon_1_userType_1_user_1" && index.unique
+    );
+    if (unique) await CouponUse.collection.dropIndex(unique.name);
+    await CouponUse.syncIndexes();
+  } catch (err) {
+    console.error("[db] Could not allow repeat coupon uses:", err.message);
   }
 }
 
