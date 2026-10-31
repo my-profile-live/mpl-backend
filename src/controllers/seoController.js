@@ -30,12 +30,31 @@ function jsonLdTag(data) {
   return `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 }
 
-function crawlerGraph(origin, page) {
+const HOME_FAQS = [
+  ["What is My Profile Live?", "My Profile Live is an executive hiring platform. A job seeker publishes one public profile. A company browses those profiles and unlocks the phone number and email only when it is ready to hire."],
+  ["Who can create an account?", "A job seeker and a company each have their own registration. An agent account is created by the admin. Sign in and registration use the same screens that are already on the site."],
+  ["Is my phone number public?", "No. The public profile shows professional details such as role, skills, and location. The phone number and email stay hidden until a company unlocks that contact."],
+  ["What does a new company pay?", "A new company starts on a 30-day trial for ₹99, including GST, with 15 leads. Longer company plans add 18% GST at checkout. The full list is on the pricing page."],
+  ["What does a new job seeker pay?", "A new job seeker starts on a 3-month trial for ₹1, including GST, with 10 credits. Job seeker plan prices already include GST."],
+  ["How does a company reach a candidate?", "The company opens the public profile, then uses Unlock Contact. That spends one lead and reveals the phone number and email for that candidate."],
+  ["Do you post jobs on this site?", "No. Companies do not post openings here, and job seekers do not apply to a job ad. Hiring starts from the verified profile."],
+  ["Where is My Profile Live based?", "The platform is operated by NILKANTH ENTERPRISE from Mota Varachha, Surat, Gujarat, India. The contact page lists the address, phone, and email."],
+];
+
+function faqEntities() {
+  return HOME_FAQS.map(([name, text]) => ({
+    "@type": "Question",
+    name,
+    acceptedAnswer: { "@type": "Answer", text },
+  }));
+}
+
+function crawlerGraph(origin, ...pages) {
   return {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "Organization",
+        "@type": ["Organization", "LocalBusiness"],
         "@id": `${origin}/#organization`,
         name: "My Profile Live",
         legalName: "NILKANTH ENTERPRISE",
@@ -62,7 +81,21 @@ function crawlerGraph(origin, page) {
           "https://www.linkedin.com/company/my-profile-livee",
         ],
         founder: { "@type": "Person", name: "Bhutik Bhai Bhuva", jobTitle: "Founder and CEO" },
-        employee: { "@type": "Person", name: "Himanshu Kapuriya", jobTitle: "Developer and tech lead", url: "https://www.himanshukapuriya.com/" },
+        employee: [
+          { "@type": "Person", name: "Bhutik Bhai Bhuva", jobTitle: "Founder and CEO" },
+          { "@type": "Person", name: "Vinayak Kachhiya", jobTitle: "Marketing partner from Tej Studio" },
+          { "@type": "Person", name: "Satish Tiwari", jobTitle: "Strategist partner" },
+          { "@type": "Person", name: "Himanshu Kapuriya", jobTitle: "Developer and tech lead", url: "https://www.himanshukapuriya.com/" },
+        ],
+        contactPoint: {
+          "@type": "ContactPoint",
+          contactType: "customer support",
+          telephone: "+91-7600688820",
+          email: "myprofilelive5@gmail.com",
+          areaServed: "IN",
+          availableLanguage: ["en"],
+        },
+        knowsAbout: ["Executive hiring", "Verified professional profiles", "Private contact details"],
       },
       {
         "@type": "WebSite",
@@ -72,7 +105,7 @@ function crawlerGraph(origin, page) {
         inLanguage: "en-IN",
         publisher: { "@id": `${origin}/#organization` },
       },
-      page,
+      ...pages,
     ],
   };
 }
@@ -213,7 +246,7 @@ export function faqPage(req, res) {
     title: "FAQ | My Profile Live",
     description,
     canonical: `${origin}/faq`,
-    schema: crawlerGraph(origin, { "@type": "FAQPage", "@id": `${origin}/faq#webpage`, name: "FAQ", url: `${origin}/faq`, description, isPartOf: { "@id": `${origin}/#website` }, about: { "@id": `${origin}/#organization` } }),
+    schema: crawlerGraph(origin, { "@type": "FAQPage", "@id": `${origin}/faq#webpage`, name: "FAQ", url: `${origin}/faq`, description, isPartOf: { "@id": `${origin}/#website` }, about: { "@id": `${origin}/#organization` }, mainEntity: faqEntities() }),
     body: `<h1>FAQ</h1>
 <h2>What is My Profile Live?</h2>
 <p>An executive hiring platform. A job seeker publishes one public profile. A company unlocks the phone number and email only when it is ready to hire.</p>
@@ -239,10 +272,16 @@ export function homePage(req, res) {
     title: "My Profile Live | Executive Hiring Platform",
     description,
     canonical: `${origin}/`,
-    schema: crawlerGraph(origin, { "@type": "WebPage", "@id": `${origin}/#webpage`, name: "My Profile Live", url: origin, description, isPartOf: { "@id": `${origin}/#website` }, about: { "@id": `${origin}/#organization` } }),
+    schema: crawlerGraph(
+      origin,
+      { "@type": "WebPage", "@id": `${origin}/#webpage`, name: "My Profile Live", url: origin, description, isPartOf: { "@id": `${origin}/#website` }, about: { "@id": `${origin}/#organization` }, hasPart: { "@id": `${origin}/#faq` } },
+      { "@type": "FAQPage", "@id": `${origin}/#faq`, name: "Questions before you start", url: `${origin}/#faq`, isPartOf: { "@id": `${origin}/#webpage` }, mainEntity: faqEntities() },
+    ),
     body: `<h1>Right executive. Right company. Faster hiring.</h1>
 <p>My Profile Live gives a job seeker one public profile and gives a company a private way to reach them. Contact details are revealed only when the company chooses to unlock them.</p>
 <p>Company trial: ₹99 including GST, 15 leads, 30 days. Job seeker trial: ₹1 including GST, 10 credits, 3 months.</p>
+<h2>Questions before you start</h2>
+${HOME_FAQS.map(([question, answer]) => `<h3>${question}</h3><p>${answer}</p>`).join("\n")}
 <p><a href="${origin}/about">About</a> · <a href="${origin}/pricing">Pricing</a> · <a href="${origin}/faq">FAQ</a> · <a href="${origin}/contact">Contact</a> · <a href="${origin}/login">Log in</a> · <a href="${origin}/signup">Register</a></p>`,
   });
   res.set("Content-Type", "text/html; charset=utf-8");
