@@ -94,7 +94,7 @@ export async function submitEnquiry(req, res) {
         bodyHtml: `
           <p style="margin:0 0 12px;">Hello ${escapeHtml(safe.name)},</p>
           <p style="margin:0 0 12px;">NILKANTH ENTERPRISE has your message about My Profile Live. We will write back to this email address.</p>
-          <p style="margin:0 0 12px;">If you are ready to start, register on the site. A job seeker trial is ₹1 including GST. A company trial is ₹99 including GST.</p>
+          <p style="margin:0 0 12px;">If you are ready to start, register on the site. A job seeker and a company each start on a free 3-month plan.</p>
           <p style="margin:0;">
             <a href="${origin}/signup/jobseeker">Register as a job seeker</a><br />
             <a href="${origin}/signup/company">Register as a company</a>

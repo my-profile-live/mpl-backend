@@ -1177,6 +1177,36 @@ export const checkJobSeekerUniqueness = asyncHandler(async (req, res) => {
 
 /* ─────────────────── COMPLETE SIGNUP PAYMENT ─────────────────── */
 
+/** Welcome plan is free for 3 months. No Cashfree order is created. */
+export const startFreeCompanyPlan = asyncHandler(async (req, res) => {
+  const role = req.user?.role;
+  if (role !== "company" && role !== "jobseeker") {
+    throw new ApiError(403, "This plan is for company and job seeker accounts.");
+  }
+  const Model = MODEL[role];
+  const user = await Model.findById(req.user._id || req.user.id);
+  if (!user) throw new ApiError(404, "Account not found.");
+  if (user.paymentDone) {
+    return res.json(
+      new ApiResponse(200, { profile: stripSensitive(user), alreadyPaid: true }, "Plan already active.")
+    );
+  }
+  const plan = getPlanById(role, DEFAULT_FREE_PLAN_ID);
+  if (!plan) throw new ApiError(500, "The free plan is not configured.");
+  const now = new Date();
+  user.currentPlan = plan.id;
+  user.planExpiry = new Date(now.getTime() + plan.days * 24 * 60 * 60 * 1000);
+  user.leadsRemaining = plan.leads;
+  user.paymentDone = true;
+  user.paymentAmount = 0;
+  user.paymentAt = now;
+  user.paymentId = `free-${user._id}`;
+  await user.save();
+  return res.json(
+    new ApiResponse(200, { profile: stripSensitive(user), paymentId: user.paymentId }, "Free plan started.")
+  );
+});
+
 export const completeSignupPayment = asyncHandler(async (req, res) => {
   const { paymentId } = req.body;
 

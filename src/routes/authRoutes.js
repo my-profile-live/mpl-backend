@@ -129,5 +129,6 @@ router.get("/me", protect, auth.getMe);
 
 /* ✅ NEW — mark signup payment on the authenticated user */
 router.post("/me/complete-payment", protect, auth.completeSignupPayment);
+router.post("/me/start-free-plan", protect, auth.startFreeCompanyPlan);
 
 export default router;

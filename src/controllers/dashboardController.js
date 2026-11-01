@@ -110,6 +110,8 @@ export async function jobSeekerDashboard(req, res) {
     new ApiResponse(200, {
       completion: req.userDoc.profileCompletion,
       leadsRemaining: req.userDoc.leadsRemaining ?? 0,
+      currentPlan: req.userDoc.currentPlan || null,
+      planExpiry: req.userDoc.planExpiry || null,
       plan: computePlanState(req.userDoc),
       stats: {
         profileViews: viewCompanies.length,
@@ -196,7 +198,9 @@ export async function companyDashboard(req, res) {
     new ApiResponse(200, {
       status: req.userDoc.status,
       leadsRemaining: req.userDoc.leadsRemaining,
-      plan: computePlanState(req.userDoc),   // ⬅️ new
+      currentPlan: req.userDoc.currentPlan || null,
+      planExpiry: req.userDoc.planExpiry || null,
+      plan: computePlanState(req.userDoc),
       stats: {
         saved: onlyPaid(savedIds).length,
         shortlisted: onlyPaid(shortlistedIds).length,

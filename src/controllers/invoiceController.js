@@ -212,6 +212,13 @@ export async function listInvoices(req, res) {
 
   for (const payment of payments) {
     await ensureInvoiceNumber(payment);
+    if (!payment.invoiceEmailedAt) {
+      try {
+        await sendInvoiceForPayment(user, role, payment);
+      } catch (err) {
+        console.error("[invoice-email]", err.message);
+      }
+    }
   }
 
   const buyer = buyerFrom(user, role);

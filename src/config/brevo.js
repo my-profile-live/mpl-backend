@@ -101,12 +101,25 @@ function codeBlock(code) {
  * Sends a branded HTML email through Brevo.
  * @param {{to: string, subject: string, html: string}} params
  */
-export async function sendEmail({ to, subject, html, attachments, replyTo }) {
+function plainText(html) {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function sendEmail({ to, subject, html, text, attachments, replyTo }) {
   const email = new brevo.SendSmtpEmail();
   email.sender = getSender();
   email.to = [{ email: to }];
   email.subject = subject;
   email.htmlContent = html;
+  email.textContent = text || plainText(html);
   if (replyTo) email.replyTo = { email: replyTo.email, name: replyTo.name || undefined };
   if (attachments?.length) email.attachment = attachments;
 

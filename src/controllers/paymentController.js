@@ -19,21 +19,20 @@ import { quoteOffer } from "../utils/couponPricing.js";
  * Signup verification fee, in paise.
  *
  *   ₹1  = 100   paise
- *   ₹99 = 9900  paise
+ *   The company and job seeker welcome plans are free.
  *
  * The frontend mirrors this in PaymentStep.jsx.
  */
 const SIGNUP_FEE_PAISE = {
-  company: 9900,
-  jobseeker: 100,
+  company: 0,
+  jobseeker: 0,
 };
 
 function getSignupFeePaise(userType) {
-  const amount = SIGNUP_FEE_PAISE[userType];
-  if (!amount) {
+  if (!Object.prototype.hasOwnProperty.call(SIGNUP_FEE_PAISE, userType)) {
     throw new ApiError(400, "userType must be 'company' or 'jobseeker'.");
   }
-  return amount;
+  return SIGNUP_FEE_PAISE[userType];
 }
 
 /** 1 month uses the verification fee. Longer plans use the catalog price. */
@@ -86,6 +85,9 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
     totalPaise: charge.amountPaise,
   });
   const amountPaise = quoted.totalPaise;
+  if (!amountPaise) {
+    throw new ApiError(400, "This company plan is free. Start it without a payment.");
+  }
   const mode = paymentMode();
   if (mode === "unavailable") {
     throw new ApiError(503, "Payments are temporarily unavailable.");
