@@ -4,7 +4,6 @@ import {
   INDUSTRIES,
   JOB_TYPES,
   WFH_OPTIONS,
-  QUALIFICATIONS,
   NOTICE_PERIODS,
   EXPERIENCE_RANGES,
   GENDERS,
@@ -201,14 +200,14 @@ export const companySignupSchema = z.object({
 /* ── Job seeker signup ── */
 const educationEntry = z
   .object({
-    qualification: z.enum(QUALIFICATIONS, {
-      errorMap: () => ({ message: "Qualification is required" }),
-    }),
+    qualification: z.string().trim().min(1, "Qualification is required"),
     specialization: z
       .string()
       .trim()
       .min(1, "Specialization is required"),
     college: z.string().optional().or(z.literal("")),
+    outOfIndia: z.boolean().optional().default(false),
+    country: z.string().optional().or(z.literal("")),
     state: z.string().trim().min(1, "State is required"),
     district: z.string().trim().min(1, "District is required"),
     passingYear: z
@@ -234,7 +233,16 @@ const educationEntry = z
       message: "College is required",
       path: ["college"],
     }
-  );
+  )
+  .superRefine((ed, ctx) => {
+    if (ed.outOfIndia && !ed.country?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["country"],
+        message: "Country is required",
+      });
+    }
+  });
 
 const employmentEntry = z.object({
   companyName: z.string().optional().or(z.literal("")),
@@ -244,6 +252,8 @@ const employmentEntry = z.object({
   experience: z.string().optional().or(z.literal("")),
   salary: z.string().optional().or(z.literal("")),
   responsibilities: z.string().optional().or(z.literal("")),
+  state: z.string().optional().or(z.literal("")),
+  district: z.string().optional().or(z.literal("")),
 });
 
 export const jobSeekerSignupSchema = z

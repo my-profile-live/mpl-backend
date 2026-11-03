@@ -1,6 +1,6 @@
 /**
  * A job seeker profile is public only after payment.
- * The welcome plan is free for 3 months. A longer plan selected at signup is a paid amount.
+ * The trial is ₹1 for a job seeker and ₹99 for a company, for 3 months. A longer plan selected at signup is a higher amount.
  * ₹0, including the account created at email OTP, stays hidden.
  */
 export const MIN_PUBLIC_PAYMENT_RUPEES = 1;

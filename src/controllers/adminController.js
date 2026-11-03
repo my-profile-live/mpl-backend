@@ -428,9 +428,10 @@ export async function exportAffiliates(req, res) {
   const affiliates = await Affiliate.find(affiliateFilter(req.query)).sort({ createdAt: -1 }).lean();
   const rows = await affiliateRows(affiliates, req.query);
   sendCsv(res, "affiliates.csv", [
-    ["Username", "Login", "Email", "Link", "Type", "Discount", "Commission %", "Conversions", "Coupon uses", "Paid", "Earned"],
+    ["Username", "Login", "Email", "Mobile", "State", "District", "Link", "Type", "Discount", "Commission %", "Conversions", "Coupon uses", "Paid", "Earned"],
     ...rows.map((row) => [
-      row.username, row.loginId, row.email, row.shortCode, row.linkType,
+      row.username, row.loginId, row.email, row.mobileNumber || "", row.state || "", row.district || "",
+      row.shortCode, row.linkType,
       row.discountPercent, row.commissionPercent, row.conversions, row.couponUses, row.paid, row.commission,
     ]),
   ]);
@@ -450,16 +451,38 @@ function linkCode(value) {
     .slice(0, 40);
 }
 
+function agentLocation(body) {
+  const stateRaw = String(body.state || "").trim();
+  const districtRaw = String(body.district || "").trim();
+  const stateOther = String(body.stateOther || "").trim();
+  const districtOther = String(body.districtOther || "").trim();
+  const state = stateRaw === "Other" ? stateOther : stateRaw;
+  const district =
+    stateRaw === "Other" || districtRaw === "Other" ? districtOther : districtRaw;
+  return { state, district };
+}
+
+function agentMobile(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 10);
+}
+
 export async function createAffiliate(req, res) {
   const username = String(req.body.username || "").trim();
   const loginId = String(req.body.loginId || "").trim().toLowerCase();
   const email = String(req.body.email || "").trim().toLowerCase();
+  const mobileNumber = agentMobile(req.body.mobileNumber);
+  const { state, district } = agentLocation(req.body);
   const password = String(req.body.password || "");
   const shortCode = linkCode(req.body.shortCode) || linkCode(loginId);
   const linkType = req.body.linkType;
   if (!username || !loginId || !email || password.length < 8 || shortCode.length < 3) {
     throw new ApiError(400, "Username, login id, email, an 8-character password, and a short link of at least 3 characters are required.");
   }
+  if (!mobileNumber || mobileNumber.length !== 10) {
+    throw new ApiError(400, "Mobile number must be exactly 10 digits.");
+  }
+  if (!state) throw new ApiError(400, "State is required.");
+  if (!district) throw new ApiError(400, "District is required.");
   if (!["referral", "coupon", "coupon_commission"].includes(linkType)) {
     throw new ApiError(400, "Choose a link type.");
   }
@@ -477,6 +500,9 @@ export async function createAffiliate(req, res) {
     username,
     loginId,
     email,
+    mobileNumber,
+    state,
+    district,
     passwordHash,
     shortCode,
     linkType,
@@ -536,6 +562,25 @@ export async function updateAffiliate(req, res) {
   if (!affiliate) throw new ApiError(404, "Affiliate not found.");
   if (req.body.username) affiliate.username = String(req.body.username).trim();
   if (req.body.email) affiliate.email = String(req.body.email).trim().toLowerCase();
+  if (req.body.mobileNumber != null) {
+    const mobileNumber = agentMobile(req.body.mobileNumber);
+    if (!mobileNumber || mobileNumber.length !== 10) {
+      throw new ApiError(400, "Mobile number must be exactly 10 digits.");
+    }
+    affiliate.mobileNumber = mobileNumber;
+  }
+  if (req.body.state != null || req.body.stateOther != null || req.body.district != null || req.body.districtOther != null) {
+    const { state, district } = agentLocation({
+      state: req.body.state != null ? req.body.state : affiliate.state,
+      stateOther: req.body.stateOther,
+      district: req.body.district != null ? req.body.district : affiliate.district,
+      districtOther: req.body.districtOther,
+    });
+    if (!state) throw new ApiError(400, "State is required.");
+    if (!district) throw new ApiError(400, "District is required.");
+    affiliate.state = state;
+    affiliate.district = district;
+  }
   const nextType = req.body.linkType || affiliate.linkType;
   if (req.body.discountPercent != null && nextType !== "referral") {
     if (!percentInRange(req.body.discountPercent)) {

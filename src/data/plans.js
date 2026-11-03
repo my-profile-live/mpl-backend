@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
    PLAN CONFIGURATION
    - id "1m" is the welcome plan granted at signup.
-     Company and job seeker: a free 3-month plan. Company: 15 leads. Job seeker: 10 credits.
+     Company trial: ₹99 including GST, 15 leads, 90 days. Job seeker trial: ₹1 including GST, 10 credits, 90 days.
    - "recommended" badge sits on the 6-Month plan for both roles
    - `days` is required by the backend for expiry math
    ═══════════════════════════════════════════════════════════════ */
@@ -12,8 +12,8 @@ export const COMPANY_PLANS = [
     label: "3 Months",
     duration: "3 months",
     days: 90,
-    price: 0,
-    priceLabel: "Free",
+    price: 99,
+    priceLabel: "₹99",
     leads: 15,
     badge: null,
   },
@@ -65,8 +65,8 @@ export const CANDIDATE_PLANS = [
     label: "3 Months",
     duration: "3 months",
     days: 90,
-    price: 99,
-    priceLabel: "₹99",
+    price: 1,
+    priceLabel: "₹1",
     leads: 10,
     badge: null,
   },
@@ -122,5 +122,5 @@ export const getPlanById = (userType, planId) =>
   getPlansForUser(userType).find((p) => p.id === planId);
 
 /* 🎁 The free plan every new user gets on signup.
-   Welcome plan id. Job seekers receive 90 days. Companies receive a free 90-day plan. */
+   Welcome plan id. Job seekers and companies receive a 90-day trial. */
 export const DEFAULT_FREE_PLAN_ID = "1m";

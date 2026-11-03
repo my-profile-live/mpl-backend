@@ -34,8 +34,8 @@ const HOME_FAQS = [
   ["What is My Profile Live?", "My Profile Live is an executive hiring platform. A job seeker publishes one public profile. A company browses those profiles and unlocks the phone number and email only when it is ready to hire."],
   ["Who can create an account?", "A job seeker and a company each have their own registration. An agent account is created by the admin. Sign in and registration use the same screens that are already on the site."],
   ["Is my phone number public?", "No. The public profile shows professional details such as role, skills, and location. The phone number and email stay hidden until a company unlocks that contact."],
-  ["What does a new company pay?", "A new company starts on a free 3-month plan with 15 leads. Longer company plans add 18% GST at checkout. The full list is on the pricing page."],
-  ["What does a new job seeker pay?", "A new job seeker starts on a free 3-month plan with 10 credits. Longer job seeker plans already include GST."],
+  ["What does a new company pay?", "A new company starts on a 3-month trial for ₹99, including GST, with 15 leads. Longer company plans add 18% GST at checkout. The full list is on the pricing page."],
+  ["What does a new job seeker pay?", "A new job seeker starts on a 3-month trial for ₹1, including GST, with 10 credits. Longer job seeker plans already include GST."],
   ["How does a company reach a candidate?", "The company opens the public profile, then uses Unlock Contact. That spends one lead and reveals the phone number and email for that candidate."],
   ["Do you post jobs on this site?", "No. Companies do not post openings here, and job seekers do not apply to a job ad. Hiring starts from the verified profile."],
   ["Where is My Profile Live based?", "The platform is operated by NILKANTH ENTERPRISE from Mota Varachha, Surat, Gujarat, India. The contact page lists the address, phone, and email."],
@@ -60,7 +60,7 @@ function crawlerGraph(origin, ...pages) {
         legalName: "NILKANTH ENTERPRISE",
         url: origin,
         logo: `${origin}/mpl-logo.webp`,
-        email: "myprofilelive5@gmail.com",
+        email: "info@myprofilelive.com",
         telephone: "+91-7600688820",
         taxID: "24AASFN7398A1ZW",
         slogan: "Right executive. Right company. Faster hiring.",
@@ -91,7 +91,7 @@ function crawlerGraph(origin, ...pages) {
           "@type": "ContactPoint",
           contactType: "customer support",
           telephone: "+91-7600688820",
-          email: "myprofilelive5@gmail.com",
+          email: "info@myprofilelive.com",
           areaServed: "IN",
           availableLanguage: ["en"],
         },
@@ -163,7 +163,7 @@ th{background:#f8fafc;font-size:.75rem;text-transform:uppercase}
 <body>
 <main>
 <h1>Plans and pricing</h1>
-<p>A new company starts on a free 3-month plan with 15 leads. A new job seeker starts on a free 3-month plan with 10 credits. The plans below replace that plan.</p>
+<p>A new company starts on a 3-month trial for ₹99, including GST, with 15 leads. A new job seeker starts on a 3-month trial for ₹1, including GST, with 10 credits. The plans below replace that trial.</p>
 <h2>Companies</h2>
 <p>The amount you pay includes 18% GST.</p>
 <table><thead><tr><th>Plan</th><th>You pay</th><th>Leads</th></tr></thead><tbody>${planRows(COMPANY_PLANS, "company")}</tbody></table>
@@ -221,7 +221,7 @@ export function aboutPage(req, res) {
 
 export function contactPage(req, res) {
   const origin = siteOrigin();
-  const description = "Contact NILKANTH ENTERPRISE in Mota Varachha, Surat. Phone +91 7600688820. Email myprofilelive5@gmail.com.";
+  const description = "Contact NILKANTH ENTERPRISE in Mota Varachha, Surat. Phone +91 7600688820. Email info@myprofilelive.com.";
   const html = guidePage({
     title: "Contact us | My Profile Live",
     description,
@@ -230,7 +230,7 @@ export function contactPage(req, res) {
     body: `<h1>Contact us</h1>
 <p>NILKANTH ENTERPRISE<br>GF, House No 594, Nishal Faliyu, Mota Varachha Main Road, Mota Varachha, Surat, Gujarat, 394105</p>
 <p>Phone: <a href="tel:+917600688820">+91 7600688820</a></p>
-<p>Email: <a href="mailto:myprofilelive5@gmail.com">myprofilelive5@gmail.com</a></p>
+<p>Email: <a href="mailto:info@myprofilelive.com">info@myprofilelive.com</a></p>
 <p>The contact page on the website also has a form. It emails the platform team and sends a confirmation to the person who wrote.</p>
 <p><a href="${origin}/about">About</a> · <a href="${origin}/privacy-policy">Privacy policy</a></p>`,
   });
@@ -253,9 +253,9 @@ export function faqPage(req, res) {
 <h2>Is my phone number public?</h2>
 <p>No. The public profile shows professional details. The phone number and email stay hidden until a company unlocks that contact.</p>
 <h2>What does a new company pay?</h2>
-<p>A new company starts on a free 3-month plan with 15 leads. Longer company plans add 18% GST at checkout.</p>
+<p>A new company starts on a 3-month trial for ₹99, including GST, with 15 leads. Longer company plans add 18% GST at checkout.</p>
 <h2>What does a new job seeker pay?</h2>
-<p>A new job seeker starts on a free 3-month plan with 10 credits. Longer job seeker plans already include GST.</p>
+<p>A new job seeker starts on a 3-month trial for ₹1, including GST, with 10 credits. Longer job seeker plans already include GST.</p>
 <h2>Do you post jobs on this site?</h2>
 <p>No. Companies do not post openings here, and job seekers do not apply to a job ad.</p>
 <p><a href="${origin}/pricing">Pricing</a> · <a href="${origin}/contact">Contact</a></p>`,
@@ -279,7 +279,7 @@ export function homePage(req, res) {
     ),
     body: `<h1>Right executive. Right company. Faster hiring.</h1>
 <p>My Profile Live gives a job seeker one public profile and gives a company a private way to reach them. Contact details are revealed only when the company chooses to unlock them.</p>
-<p>Company plan: free for 3 months, 15 leads. Job seeker plan: free for 3 months, 10 credits.</p>
+<p>Company trial: ₹99 including GST, 15 leads, 3 months. Job seeker trial: ₹1 including GST, 10 credits, 3 months.</p>
 <h2>Questions before you start</h2>
 ${HOME_FAQS.map(([question, answer]) => `<h3>${question}</h3><p>${answer}</p>`).join("\n")}
 <p><a href="${origin}/about">About</a> · <a href="${origin}/pricing">Pricing</a> · <a href="${origin}/faq">FAQ</a> · <a href="${origin}/contact">Contact</a> · <a href="${origin}/login">Log in</a> · <a href="${origin}/signup">Register</a></p>`,
@@ -358,7 +358,7 @@ export async function llmsTxt(req, res) {
     "- GSTIN: 24AASFN7398A1ZW",
     "- Address: GF, House No 594, Nishal Faliyu, Mota Varachha Main Road, Mota Varachha, Surat, Gujarat, 394105, India",
     "- Phone: +91 7600688820",
-    "- Email: myprofilelive5@gmail.com",
+    "- Email: info@myprofilelive.com",
     "- Slogan: Right executive. Right company. Faster hiring.",
     "",
     "## Team",
@@ -370,8 +370,8 @@ export async function llmsTxt(req, res) {
     "",
     "## Plans",
     "",
-    "- Company plan: free for 3 months, 15 leads.",
-    "- Job seeker plan: free for 3 months, 10 credits.",
+    "- Company trial: ₹99 including GST, 15 leads, 3 months.",
+    "- Job seeker trial: ₹1 including GST, 10 credits, 3 months.",
     "- Company plans add 18% GST at checkout. Public card prices for 3, 6, and 12 months are ₹2,549, ₹4,549, and ₹8,549 before GST.",
     "- Job seeker paid prices include GST: 3 months ₹249, 6 months ₹449, 12 months ₹849.",
     "- Extra company leads: ₹50 each before GST, minimum 25.",

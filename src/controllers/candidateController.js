@@ -481,6 +481,8 @@ function toPublicProfile(doc) {
         leavingDate: job.leavingDate || "",
         experience: job.experience || "",
         responsibilities: job.responsibilities || "",
+        state: job.state || "",
+        district: job.district || "",
       }))
     : [];
   const education = Array.isArray(src.education)
@@ -489,6 +491,10 @@ function toPublicProfile(doc) {
         specialization: item.specialization || "",
         college: item.college || "",
         university: item.university || "",
+        outOfIndia: !!item.outOfIndia,
+        country: item.country || "",
+        state: item.state || "",
+        district: item.district || "",
         passingYear: item.passingYear || "",
         percentage: item.percentage || "",
       }))

@@ -19,13 +19,13 @@ import { quoteOffer } from "../utils/couponPricing.js";
  * Signup verification fee, in paise.
  *
  *   ₹1  = 100   paise
- *   The company and job seeker welcome plans are free.
+ *   Company trial ₹99 = 9900 paise. Job seeker trial ₹1 = 100 paise. Both include GST.
  *
  * The frontend mirrors this in PaymentStep.jsx.
  */
 const SIGNUP_FEE_PAISE = {
-  company: 0,
-  jobseeker: 0,
+  company: 9900,
+  jobseeker: 100,
 };
 
 function getSignupFeePaise(userType) {
@@ -86,7 +86,7 @@ export const createSignupOrder = asyncHandler(async (req, res) => {
   });
   const amountPaise = quoted.totalPaise;
   if (!amountPaise) {
-    throw new ApiError(400, "This company plan is free. Start it without a payment.");
+    throw new ApiError(400, "Choose a plan with a payable amount.");
   }
   const mode = paymentMode();
   if (mode === "unavailable") {

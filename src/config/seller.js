@@ -13,7 +13,7 @@ export function sellerProfile() {
     pan: gstin.length >= 12 ? gstin.slice(2, 12) : "",
     stateCode: gstin.slice(0, 2),
     address: process.env.MPL_ADDRESS || SUPPLIER_ADDRESS,
-    email: "myprofilelive5@gmail.com",
+    email: "info@myprofilelive.com",
     phone: "+91 7600688820",
     sac: "997158",
     sacLabel: "Online information and database access",

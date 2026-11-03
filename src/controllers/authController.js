@@ -1203,7 +1203,7 @@ export const startFreeCompanyPlan = asyncHandler(async (req, res) => {
   user.paymentId = `free-${user._id}`;
   await user.save();
   return res.json(
-    new ApiResponse(200, { profile: stripSensitive(user), paymentId: user.paymentId }, "Free plan started.")
+    new ApiResponse(200, { profile: stripSensitive(user), paymentId: user.paymentId }, "Trial started.")
   );
 });
 

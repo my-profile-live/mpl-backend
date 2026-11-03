@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { emailLayout, sendEmail } from "../config/brevo.js";
 
-const ADMIN_EMAIL = "myprofilelive5@gmail.com";
+const ADMIN_EMAIL = "info@myprofilelive.com";
 
 const enquirySchema = z.object({
   name: z.string().trim().min(2, "Enter your name").max(80),
@@ -79,7 +79,7 @@ export async function submitEnquiry(req, res) {
     console.error("[contact] admin mail failed:", err?.message || err);
     return res.status(503).json({
       success: false,
-      message: "The message could not be sent just now. Call +91 7600688820 or email myprofilelive5@gmail.com.",
+      message: "The message could not be sent just now. Call +91 7600688820 or email info@myprofilelive.com.",
     });
   }
 
@@ -90,11 +90,11 @@ export async function submitEnquiry(req, res) {
       html: emailLayout({
         preheader: "We have your message about My Profile Live.",
         title: "We received your message",
-        footerNote: "Replies come from myprofilelive5@gmail.com. You can also call +91 7600688820.",
+        footerNote: "Replies come from info@myprofilelive.com. You can also call +91 7600688820.",
         bodyHtml: `
           <p style="margin:0 0 12px;">Hello ${escapeHtml(safe.name)},</p>
           <p style="margin:0 0 12px;">NILKANTH ENTERPRISE has your message about My Profile Live. We will write back to this email address.</p>
-          <p style="margin:0 0 12px;">If you are ready to start, register on the site. A job seeker and a company each start on a free 3-month plan.</p>
+          <p style="margin:0 0 12px;">If you are ready to start, register on the site. A job seeker trial is ₹1 including GST. A company trial is ₹99 including GST. Both run for 3 months.</p>
           <p style="margin:0;">
             <a href="${origin}/signup/jobseeker">Register as a job seeker</a><br />
             <a href="${origin}/signup/company">Register as a company</a>

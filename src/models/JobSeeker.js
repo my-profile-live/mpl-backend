@@ -6,6 +6,8 @@ const educationSchema = new mongoose.Schema(
     specialization: String,
     college: String,
     university: String,
+    outOfIndia: { type: Boolean, default: false },
+    country: String,
     state: String,
     district: String,
     passingYear: String,
@@ -23,6 +25,8 @@ const employmentSchema = new mongoose.Schema(
     experience: String,
     salary: String,
     responsibilities: String,
+    state: String,
+    district: String,
   },
   { _id: true }
 );

@@ -7,7 +7,7 @@ import * as brevo from "@getbrevo/brevo";
  */
 
 const LOGO_URL = "https://myprofilelive.com/email-logo.jpg";
-const SUPPORT_EMAIL = "myprofilelive5@gmail.com";
+const SUPPORT_EMAIL = "info@myprofilelive.com";
 
 let _apiInstance = null;
 
